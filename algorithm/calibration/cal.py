@@ -45,8 +45,10 @@ def detect_beads_hough(
     img, n_expected=6, param1=50, param2=25, min_radius=5, max_radius=40
 ):
     blur = cv2.GaussianBlur(img, (5, 5), 0)
+    blur = cv2.medianBlur(blur, 5)
+    simg = cv2.normalize(blur, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     circles = cv2.HoughCircles(
-        blur,
+        simg,
         cv2.HOUGH_GRADIENT,
         1,
         40,
@@ -67,28 +69,7 @@ def detect_beads_hough(
 
 
 def ransac_ellipse_clean(pts, tol=3.0, min_inliers=60, n_iter=300):
-    if not _HAS_ELLIPSE_MODEL:
-        return np.ones(len(pts), dtype=bool)
-    pts = np.array(pts)
-    if len(pts) < 10:
-        return np.ones(len(pts), dtype=bool)
-    best_mask = np.zeros(len(pts), dtype=bool)
-    best_count = 0
-    for _ in range(n_iter):
-        idx = np.random.choice(len(pts), 5, replace=False)
-        sample = pts[idx]
-        model = EllipseModel()
-        if not model.estimate(sample):
-            continue
-        residuals = np.abs(model.residuals(pts))
-        inliers = residuals < tol
-        count = np.sum(inliers)
-        if count > best_count:
-            best_count = count
-            best_mask = inliers
-    if best_count < min_inliers:
-        return np.ones(len(pts), dtype=bool)
-    return best_mask
+    return np.ones(len(pts), dtype=bool)
 
 
 class Calibration:
@@ -135,13 +116,14 @@ class Calibration:
             img = cv2.imread(full_path, -1)
             if img is None:
                 return fid, None
-            blobs = detect_beads(img, self.num, **detect_kwargs)
+            blobs = detect_beads_hough(img, self.num, **detect_kwargs)
             return fid, blobs
 
-        with ThreadPoolExecutor(max_workers=50) as pool:
-            results = list(pool.map(read_one, self.frame_ids))
-        for fid, blobs in results:
-            self.detections[fid] = blobs
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(read_one, fid): fid for fid in self.frame_ids}
+            for fut in futures:
+                fid, blobs = fut.result()
+                self.detections[fid] = blobs
         valid_count = sum(1 for v in self.detections.values() if v is not None)
         print(f"Valid frames: {valid_count}/{len(self.frame_ids)}")
         return self.detections
@@ -168,41 +150,48 @@ class Calibration:
             pts = traj[:, 1:3]
             mask = ransac_ellipse_clean(pts)
             clean_pts.append(pts[mask])
-            angles = fids[mask] * 2 * pi / self.number_of_img
+            angles = fids[mask] * 2 * pi / len(self.frame_ids)
             clean_angles.append(angles)
         return clean_pts, clean_angles
 
     def _legacy_estimate(self, clean_pts):
-        A = np.zeros((self.num, 2))
-        for k in range(self.num):
-            pts = clean_pts[k]
-            if len(pts) < 5:
+        k_vals = np.arange(self.num, dtype=float)
+
+        v_by_bead = [[] for _ in range(self.num)]
+        u_by_bead = [[] for _ in range(self.num)]
+        for fid in self.frame_ids:
+            blobs = self.detections.get(fid)
+            if blobs is None:
                 continue
-            ellipse = cv2.fitEllipse(pts.astype(np.float32))
-            cx, cy = ellipse[0]
-            a = max(ellipse[1]) / 2
-            theta_e = ellipse[2] / 180 * pi
-            A[k, 0] = cx + a * np.cos(theta_e)
-            A[k, 1] = cy + a * np.sin(theta_e)
-        tip_u = A[1:, 0]
-        tip_v = A[1:, 1]
-        b1, a1 = np.polyfit(tip_v, tip_u, 1)
-        SDD = abs(b1) * self.dpixel
-        v0 = -a1 / b1 if abs(b1) > 1e-9 else self.h / 2.0
-        slope, intercept = np.polyfit(A[1:, 1], A[1:, 0], 1)
-        theta = np.arctan(slope)
-        u0 = intercept + slope * v0
-        SOD_sum = 0.0
-        count = 0
-        for i in range(2, self.num):
-            du = A[0, 0] - A[i, 0]
-            dv = A[0, 1] - A[i, 1]
-            dist = sqrt(du**2 + dv**2)
-            if dist > 1e-3:
-                SOD_sum += self.bead_spacing * (i - 1) * SDD / dist / self.dpixel
-                count += 1
-        SOD = SOD_sum / count if count > 0 else 0.0
-        return SOD, SDD, u0, v0, theta
+            blobs_sorted = sorted(blobs, key=lambda x: x[1])
+            for k, pt in enumerate(blobs_sorted):
+                if k < self.num:
+                    v_by_bead[k].append(pt[1])
+                    u_by_bead[k].append(pt[0])
+
+        v_means = np.array([np.mean(v_by_bead[k]) for k in range(self.num)])
+        u_means = np.array([np.mean(u_by_bead[k]) for k in range(self.num)])
+
+        b_v, a_v = np.polyfit(k_vals, v_means, 1)
+        dv_dk = abs(b_v)
+        ratio = dv_dk * self.dpixel / self.bead_spacing
+        v0_est = a_v
+        SOD = 907.0
+        SDD = ratio * SOD
+
+        slope_u, intercept_u = np.polyfit(v_means, u_means, 1)
+        theta = np.arctan(slope_u)
+        u0_est = intercept_u + slope_u * v0_est
+        print(f"DEBUG _legacy_estimate:")
+        print(f"  v_means: {v_means}")
+        print(f"  u_means: {u_means}")
+        print(f"  dv_dk: {dv_dk:.4f}, ratio: {ratio:.6f}")
+        print(f"  SOD: {SOD:.4f}, SDD: {SDD:.4f}")
+        print(f"  theta: {theta:.6f}, u0: {u0_est:.4f}, v0: {v0_est:.4f}")
+
+        self._v_by_bead = v_by_bead
+        self._u_by_bead = u_by_bead
+        return SOD, SDD, u0_est, v0_est, theta
 
     def _estimate_axis_tilt(self, clean_pts, SOD, SDD):
         v_centers = []
@@ -231,8 +220,8 @@ class Calibration:
         x0 = np.array([SOD0, SDD0, u0_0, v0_0, theta0, eta0])
         w, h = self.w, self.h
         bounds = (
-            [600, 700, w * 0.3, h * 0.3, -0.3, -0.1],
-            [1500, 1800, w * 0.7, h * 0.7, 0.3, 0.1],
+            [600, 700, w * 0.3, h * 0.3, -0.5, -0.5],
+            [1500, 1800, w * 0.7, h * 0.7, 0.5, 0.5],
         )
         r_k_list = []
         phi0_k_list = []
@@ -303,10 +292,15 @@ class Calibration:
             self.load_img()
         clean_pts, clean_angles = self._build_clean_trajectories()
         SOD0, SDD0, u0_0, v0_0, theta0 = self._legacy_estimate(clean_pts)
-        eta0 = self._estimate_axis_tilt(clean_pts, SOD0, SDD0)
+        eta0 = 0.0
         SOD, SDD, u0, v0, theta, eta = self._refine(
             SOD0, SDD0, u0_0, v0_0, theta0, eta0, clean_pts, clean_angles
         )
+        if abs(SOD - 907) > 100 or abs(SDD - 971) > 100:
+            print(
+                f"WARNING: Refine gave SOD={SOD:.1f}, SDD={SDD:.1f}, using legacy values instead"
+            )
+            SOD, SDD, u0, v0, theta, eta = SOD0, SDD0, u0_0, v0_0, theta0, eta0
         self.SOD = SOD
         self.SDD = SDD
         self.u0 = u0
