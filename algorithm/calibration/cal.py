@@ -227,12 +227,7 @@ class Calibration:
     def _refine(self, SOD0, SDD0, u0_0, v0_0, theta0, eta0, clean_pts, clean_angles):
         from scipy.optimize import least_squares
 
-        x0 = np.array([SOD0, SDD0, u0_0, v0_0, theta0, eta0])
         w, h = self.w, self.h
-        bounds = (
-            [600, 700, w * 0.3, h * 0.3, -0.5, -0.5],
-            [1500, 1800, w * 0.7, h * 0.7, 0.5, 0.5],
-        )
         r_k_list = []
         phi0_k_list = []
         for k in range(self.num):
@@ -242,14 +237,24 @@ class Calibration:
                 phi0_k_list.append(0.0)
                 continue
             u_vals = pts[:, 0]
-            r_est = (u_vals.max() - u_vals.min()) / 2.0 * self.dpixel * SOD0 / SDD0
-            argmax_u = np.argmax(u_vals)
-            phi0 = clean_angles[k][argmax_u]
+            angles = clean_angles[k]
+            A_mat = np.column_stack(
+                [np.cos(angles), np.sin(angles), np.ones(len(angles))]
+            )
+            coeffs, _, _, _ = np.linalg.lstsq(A_mat, u_vals, rcond=None)
+            Ac, As, C = coeffs
+            phi0 = np.arctan2(-As, Ac)
+            r_fit = np.sqrt(Ac**2 + As**2)
+            r_est = r_fit * self.dpixel * SOD0 / SDD0
             r_k_list.append(r_est)
             phi0_k_list.append(phi0)
+            print(f"  球 {k}: r_est={r_est:.2f}mm, phi0={np.degrees(phi0):.2f}°")
 
-        def residuals(params):
-            SOD, SDD, u0, v0, theta, eta = params
+        r_arr = np.array(r_k_list)
+        phi0_arr = np.array(phi0_k_list)
+
+        def residuals_fixed_geom(params):
+            u0, v0, theta, eta = params
             dpixel = self.dpixel
             res = []
             for k in range(self.num):
@@ -258,44 +263,45 @@ class Calibration:
                 if len(pts) < 3:
                     continue
                 z_k = k * self.bead_spacing
-                r_k = r_k_list[k]
-                phi0_k = phi0_k_list[k]
-                for ii, (phi, u_obs, v_obs) in enumerate(
-                    zip(angles, pts[:, 0], pts[:, 1])
-                ):
+                r_k, phi0_k = r_arr[k], phi0_arr[k]
+                for phi, u_obs, v_obs in zip(angles, pts[:, 0], pts[:, 1]):
                     x_k = r_k * np.cos(phi + phi0_k)
                     y_k = r_k * np.sin(phi + phi0_k)
-                    z_eff = z_k - eta * (SOD + y_k) * np.sin(phi)
-                    denom = SOD + y_k
-                    u_ideal = u0 + (SDD * x_k / denom) / dpixel
-                    v_ideal = v0 + (SDD * z_eff / denom) / dpixel
+                    z_eff = z_k - eta * (SOD0 + y_k) * np.sin(phi)
+                    denom = SOD0 + y_k
+                    u_ideal = u0 + (SDD0 * x_k / denom) / dpixel
+                    v_ideal = v0 + (SDD0 * z_eff / denom) / dpixel
                     du_rel = u_ideal - u0
                     dv_rel = v_ideal - v0
                     u_pred = u0 + np.cos(theta) * du_rel - np.sin(theta) * dv_rel
                     v_pred = v0 + np.sin(theta) * du_rel + np.cos(theta) * dv_rel
-                    res.append(u_pred - u_obs)
-                    res.append(v_pred - v_obs)
+                    res.extend([u_pred - u_obs, v_pred - v_obs])
             return np.array(res)
 
-        initial_res = residuals(x0)
+        x0_partial = np.array([u0_0, v0_0, theta0, eta0])
+        bounds_partial = ([w * 0.3, h * 0.3, -0.5, -1.0], [w * 0.7, h * 0.7, 0.5, 1.0])
+        initial_res = residuals_fixed_geom(x0_partial)
         initial_rms = np.sqrt(np.mean(initial_res**2))
         print(f"Initial RMS: {initial_rms:.4f} pixels")
         result = least_squares(
-            residuals,
-            x0,
-            bounds=bounds,
+            residuals_fixed_geom,
+            x0_partial,
+            bounds=bounds_partial,
             method="trf",
-            max_nfev=2000,
-            ftol=1e-10,
-            xtol=1e-10,
+            max_nfev=5000,
+            ftol=1e-12,
+            xtol=1e-12,
         )
-        final_res = residuals(result.x)
+        final_res = residuals_fixed_geom(result.x)
         final_rms = np.sqrt(np.mean(final_res**2))
         print(f"Final RMS: {final_rms:.4f} pixels")
-        names = ["SOD", "SDD", "u0", "v0", "theta", "eta"]
+        u0, v0, theta, eta = result.x
+        names = ["u0", "v0", "theta", "eta"]
         for i, n in enumerate(names):
-            print(f"  {n}: {result.x[i]:.6f} (change: {result.x[i] - x0[i]:+.6f})")
-        return tuple(result.x)
+            print(
+                f"  {n}: {result.x[i]:.6f} (change: {result.x[i] - x0_partial[i]:+.6f})"
+            )
+        return (SOD0, SDD0, u0, v0, theta, eta)
 
     def calculate(self):
         if not self.detections:
