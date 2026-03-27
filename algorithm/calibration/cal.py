@@ -186,8 +186,55 @@ class Calibration:
         dv_dk = abs(b_v)
         ratio = dv_dk * self.dpixel / self.bead_spacing
         v0_est = a_v
-        SOD = 907.0
-        SDD = ratio * SOD
+
+        try:
+            from scipy.optimize import curve_fit
+
+            traj0_fids, traj0_u = [], []
+            for fid in self.frame_ids:
+                blobs = self.detections.get(fid)
+                if blobs is None:
+                    continue
+                blobs_sorted = sorted(blobs, key=lambda x: x[1])
+                traj0_fids.append(fid)
+                traj0_u.append(blobs_sorted[0][0])
+            phi_arr = np.array(traj0_fids) * 2 * pi / self.number_of_img
+            u_arr = np.array(traj0_u)
+
+            def u_model(phi, SOD_fit, R_fit, phi0_fit, u0_fit):
+                SDD_fit = ratio * SOD_fit
+                y_k = R_fit * np.sin(phi + phi0_fit)
+                x_k = R_fit * np.cos(phi + phi0_fit)
+                return u0_fit + SDD_fit * x_k / (SOD_fit + y_k) / self.dpixel
+
+            Ac = np.dot(np.cos(phi_arr), u_arr) / len(phi_arr) * 2
+            As = np.dot(np.sin(phi_arr), u_arr) / len(phi_arr) * 2
+            phi0_init = np.arctan2(-As, Ac)
+            u0_init = u_arr.mean()
+            A_init = np.sqrt(Ac**2 + As**2)
+            R_init = A_init * self.dpixel / ratio
+            p0 = [907.0, R_init, phi0_init, u0_init]
+            bounds_cf = ([800, 10, -pi, u0_init - 200], [1000, 60, pi, u0_init + 200])
+            popt, _ = curve_fit(
+                u_model, phi_arr, u_arr, p0=p0, bounds=bounds_cf, maxfev=5000
+            )
+            SOD_fit = float(popt[0])
+            SDD_fit = ratio * SOD_fit
+            R_verify = A_init * self.dpixel / ratio
+            if abs(SOD_fit - 907) < 50:
+                SOD = SOD_fit
+                SDD = SDD_fit
+                print(
+                    f"非线性拟合验证通过: SOD={SOD:.2f}, SDD={SDD:.2f}, R={popt[1]:.2f}mm"
+                )
+            else:
+                SOD = 907.0
+                SDD = ratio * SOD
+                print(f"非线性 SOD={SOD_fit:.1f} 与预期907偏差大，使用默认 SOD=907")
+        except Exception as e:
+            print(f"非线性 SOD 估计失败: {e}，使用默认 SOD=907")
+            SOD = 907.0
+            SDD = ratio * SOD
 
         slope_u, intercept_u = np.polyfit(v_means, u_means, 1)
         theta = np.arctan(slope_u)
@@ -301,7 +348,7 @@ class Calibration:
             print(
                 f"  {n}: {result.x[i]:.6f} (change: {result.x[i] - x0_partial[i]:+.6f})"
             )
-        return (SOD0, SDD0, u0, v0, theta, eta)
+        return (SOD0, SDD0, u0, v0, theta, eta, final_rms)
 
     def calculate(self):
         if not self.detections:
@@ -309,14 +356,14 @@ class Calibration:
         clean_pts, clean_angles = self._build_clean_trajectories()
         SOD0, SDD0, u0_0, v0_0, theta0 = self._legacy_estimate(clean_pts)
         eta0 = 0.0
-        SOD, SDD, u0, v0, theta, eta = self._refine(
+        SOD, SDD, u0, v0, theta, eta, refine_rms = self._refine(
             SOD0, SDD0, u0_0, v0_0, theta0, eta0, clean_pts, clean_angles
         )
         if abs(SOD - 907) > 100 or abs(SDD - 971) > 100:
             print(
-                f"WARNING: Refine gave SOD={SOD:.1f}, SDD={SDD:.1f}, using legacy values instead"
+                f"WARNING: Refine gave SOD={SOD:.1f}, SDD={SDD:.1f}, "
+                f"偏离初始值较大，请检查校准质量 (RMS={refine_rms:.3f}px)"
             )
-            SOD, SDD, u0, v0, theta, eta = SOD0, SDD0, u0_0, v0_0, theta0, eta0
         self.SOD = SOD
         self.SDD = SDD
         self.u0 = u0
