@@ -3,7 +3,7 @@ import DexelaPy
 import sys
 from concurrent.futures import ThreadPoolExecutor
 import concurrent
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 import queue
 from multiprocessing.connection import Client
 import weakref
@@ -12,12 +12,15 @@ import time
 
 
 class CBData:
-    def __init__(self, start_count,  number, client, pool, fut_queue=None):
+    def __init__(
+        self, start_count, number, client, pool, fut_queue=None, send_queue=None
+    ):
         self.start_count = start_count
         self.number = number
         self.client = client
         self.pool = pool
         self.fut_queue = fut_queue
+        self.send_queue = send_queue
 
 
 class Detector:
@@ -39,7 +42,12 @@ class Detector:
             sys.exit(1)
 
     def set_seq_mode(
-        self, exposureTime, exit_queue=None, gap_time=0,scan_number=0, filename=None,
+        self,
+        exposureTime,
+        exit_queue=None,
+        gap_time=0,
+        scan_number=0,
+        filename=None,
     ):
         self.exposureTime = exposureTime
         self.gap_time = gap_time
@@ -62,39 +70,39 @@ class Detector:
             self.detector.SetNumOfExposures(scan_number)
 
     def set_snap_mode(self, exposureTime):
-       self.exposureTime = exposureTime
-       expMode = DexelaPy.ExposureModes.Expose_and_read
-       binFmt = DexelaPy.bins.x11
-       wellMode = DexelaPy.FullWellModes.High
-       trigger = DexelaPy.ExposureTriggerSource.Internal_Software
-       p = self.detector.OpenBoard()
-       self.w = self.detector.GetBufferXdim()
-       self.h = self.detector.GetBufferYdim()
-       self.detector.SetFullWellMode(wellMode)
-       self.detector.SetExposureTime(exposureTime)
-       self.detector.SetBinningMode(binFmt)
-       self.detector.SetTriggerSource(trigger)
-       self.detector.SetExposureMode(expMode)
-       model = self.detector.GetModelNumber()
+        self.exposureTime = exposureTime
+        expMode = DexelaPy.ExposureModes.Expose_and_read
+        binFmt = DexelaPy.bins.x11
+        wellMode = DexelaPy.FullWellModes.High
+        trigger = DexelaPy.ExposureTriggerSource.Internal_Software
+        p = self.detector.OpenBoard()
+        self.w = self.detector.GetBufferXdim()
+        self.h = self.detector.GetBufferYdim()
+        self.detector.SetFullWellMode(wellMode)
+        self.detector.SetExposureTime(exposureTime)
+        self.detector.SetBinningMode(binFmt)
+        self.detector.SetTriggerSource(trigger)
+        self.detector.SetExposureMode(expMode)
+        model = self.detector.GetModelNumber()
 
-    def snap(self,filename=None):
-       img = DexelaPy.DexImagePy()
-       try:
-           self.detector.Snap(1, self.exposureTime+500)
-           self.detector.ReadBuffer(1,img)
-       except DexelaPy.DexelaExceptionPy as e:
-           return None
-       if filename is None:
-           filename = 'Image_%dx%d.tif' % (img.GetImageXdim(),img.GetImageYdim())
-       fut = self.pool.submit(self.trans_img, img, filename)
-       return fut
+    def snap(self, filename=None):
+        img = DexelaPy.DexImagePy()
+        try:
+            self.detector.Snap(1, self.exposureTime + 500)
+            self.detector.ReadBuffer(1, img)
+        except DexelaPy.DexelaExceptionPy as e:
+            return None
+        if filename is None:
+            filename = "Image_%dx%d.tif" % (img.GetImageXdim(), img.GetImageYdim())
+        fut = self.pool.submit(self.trans_img, img, filename)
+        return fut
 
     def trans_img(self, img, filename):
-       img.UnscrambleImage()
-       buf = img.GetPlaneData()
-       ar = np.array(buf, dtype=np.uint16)
-       buf = ar.tobytes()
-       return buf
+        img.UnscrambleImage()
+        buf = img.GetPlaneData()
+        ar = np.array(buf, dtype=np.uint16)
+        buf = ar.tobytes()
+        return buf
 
     def can_exit(self):
         if self.exit_queue is None:
@@ -107,7 +115,7 @@ class Detector:
 
     def seq_save(self, count, img, client):
         img.UnscrambleImage()
-        #sys.stderr.write("send {}\r\n".format(count))
+        # sys.stderr.write("send {}\r\n".format(count))
         buf = img.GetPlaneData()
         ar = np.array(buf, dtype=np.uint16)
         buf = ar.tobytes()
@@ -119,27 +127,49 @@ class Detector:
         self.detector.GoLiveSeq(0, 4, self.scan_number)
         startCount = self.detector.GetFieldCount()
         fut_queue = queue.Queue()
-        cbData = CBData(startCount, self.scan_number, client=self.client, pool=self.pool, fut_queue=fut_queue)
+        send_queue = queue.Queue(maxsize=100)
+        exit_event = Event()
+        cbData = CBData(
+            startCount,
+            self.scan_number,
+            client=self.client,
+            pool=self.pool,
+            fut_queue=fut_queue,
+            send_queue=send_queue,
+        )
         self.detector.SetCallbackData(cbData)
         self.detector.SetCallback(seq_callback, weakref.ref(self.detector))
         self.detector.CheckForCallbackError()
         self.detector.CheckForLiveError()
         self.detector.SoftwareTrigger()
         self.finished = False
+        send_thread = Thread(
+            target=send_loop,
+            args=(send_queue, self.client, self.client_lock, exit_event),
+            daemon=True,
+        )
+        send_thread.start()
         sys.stderr.write("seq start! {}".format(self.scan_number))
         sys.stderr.flush()
         imCnt = 0
         fut_list = []
         while self.detector.IsLive():
-            sys.stderr.write("all_count {} scan_number {}\r\n".format(all_count, self.scan_number))
+            sys.stderr.write(
+                "all_count {} scan_number {}\r\n".format(all_count, self.scan_number)
+            )
             time.sleep(1)
         if self.detector.IsLive() == True:
             self.detector.GoUnLive()
-        #while fut_queue.empty() == False:
-        #    fut = fut_queue.get()
-        #    fut.result()
-
-
+        exit_event.set()
+        send_thread.join(timeout=5)
+        while not send_queue.empty():
+            try:
+                count, buf = send_queue.get_nowait()
+                with self.client_lock:
+                    self.client.send((count, buf))
+                send_queue.task_done()
+            except queue.Empty:
+                break
         sys.stderr.write("end!")
         sys.stderr.flush()
 
@@ -153,11 +183,15 @@ class Detector:
         self.detector.CloseBoard()
         return
 
+
 all_count = 0
+
+
 def send_img(img, count, client):
-    #img = np.flip(img, axis=0)
+    # img = np.flip(img, axis=0)
     sys.stderr.write("send count {}\r\n".format(count))
     client.send((count, img))
+
 
 def seq_callback(fc, buf, detRef):
     global all_count
@@ -165,22 +199,31 @@ def seq_callback(fc, buf, detRef):
     det = detRef()
     cbData = det.GetCallbackData()
     img = DexelaPy.DexImagePy()
-    det.ReadBuffer(buf,img)
+    det.ReadBuffer(buf, img)
 
     img.UnscrambleImage()
-    count = fc-cbData.start_count-2
+    count = fc - cbData.start_count - 2
 
     buf = img.GetPlaneData()
     ar = np.array(buf, dtype=np.uint16)
-    #ar = np.flip(ar, axis=0)
     buf = ar.tobytes()
-    #print("!get callback!2", count)
-    #img.WriteImage(savename)
-    #fut = cbData.pool.submit(send_img, buf, count, cbData.client)
-    #cbData.fut_queue.put(fut)
-    sys.stderr.write("send count {}\r\n".format(count))
-    cbData.client.send((count, buf))
+    sys.stderr.write("queue count {}\r\n".format(count))
+    cbData.send_queue.put((count, buf))
     sys.stderr.write("\n")
+
+
+def send_loop(send_queue, client, client_lock, exit_event):
+    while not exit_event.is_set():
+        try:
+            count, buf = send_queue.get(timeout=0.1)
+            with client_lock:
+                client.send((count, buf))
+            send_queue.task_done()
+        except queue.Empty:
+            continue
+        except Exception as e:
+            sys.stderr.write("send error: {}\r\n".format(e))
+
 
 def fin_loop(fut_queue, exit_queue):
     client = Client(r"\\.\pipe\detectResult", authkey=b"ctRestruct")
@@ -217,38 +260,40 @@ if __name__ == "__main__":
         sys.stdout.write("ERROR02\n")
         sys.stdout.flush()
     progress = sys.argv[1]
-    if progress == 'snap':
-       exposeTime = 200
-       if len(sys.argv) == 3:
-           exposeTime = int(sys.argv[2])
-       detector = Detector()
-       detector.set_snap_mode(exposeTime)
-       fut_queue = queue.Queue()
-       exit_queue = queue.Queue()
-       fin_thread = Thread(target=fin_loop, args=(fut_queue,exit_queue))
-       fin_thread.start()
-       while True:
-           cmd = sys.stdin.readline()
-           if cmd.startswith('snap'):
-               _, filename = cmd.split(' ')
-               filename=filename.strip()
-               fut = detector.snap(filename)
-               sys.stdout.write('ok\n')
-               sys.stdout.flush()
-               fut_queue.put((filename, fut))
-           elif cmd.startswith('exit'):
-               exit_queue.put(True)
-               break
-           else:
-               break
+    if progress == "snap":
+        exposeTime = 200
+        if len(sys.argv) == 3:
+            exposeTime = int(sys.argv[2])
+        detector = Detector()
+        detector.set_snap_mode(exposeTime)
+        fut_queue = queue.Queue()
+        exit_queue = queue.Queue()
+        fin_thread = Thread(target=fin_loop, args=(fut_queue, exit_queue))
+        fin_thread.start()
+        while True:
+            cmd = sys.stdin.readline()
+            if cmd.startswith("snap"):
+                _, filename = cmd.split(" ")
+                filename = filename.strip()
+                fut = detector.snap(filename)
+                sys.stdout.write("ok\n")
+                sys.stdout.flush()
+                fut_queue.put((filename, fut))
+            elif cmd.startswith("exit"):
+                exit_queue.put(True)
+                break
+            else:
+                break
     elif progress == "seq":
         exposeTime = int(sys.argv[2])
         gapTime = int(sys.argv[3])
         number = int(sys.argv[4])
         detector = Detector()
         exit_queue = queue.Queue()
-        sys.stderr.write("exposeTim {} gapTime{} number {}\r\n".format(exposeTime, gapTime, number))
-        detector.set_seq_mode(exposeTime, exit_queue,  gapTime, number+1)
+        sys.stderr.write(
+            "exposeTim {} gapTime{} number {}\r\n".format(exposeTime, gapTime, number)
+        )
+        detector.set_seq_mode(exposeTime, exit_queue, gapTime, number + 1)
 
         sys.stdout.write("READY\n")
         sys.stdout.flush()
