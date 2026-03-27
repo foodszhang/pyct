@@ -110,6 +110,7 @@ class Calibration:
         self.frame_ids = []
         self.detections = {}
         self.eta = 0.0
+        self.number_of_img = 0
 
     def _scan_frames(self):
         if not os.path.isdir(self.proj_path):
@@ -122,6 +123,7 @@ class Calibration:
         if not frame_ids:
             raise FileNotFoundError(f"No .tif frames found in {self.proj_path}")
         frame_ids.sort()
+        self.number_of_img = max(frame_ids) + 1
         return frame_ids
 
     def load_img(self, **detect_kwargs):
@@ -166,43 +168,28 @@ class Calibration:
             pts = traj[:, 1:3]
             mask = ransac_ellipse_clean(pts)
             clean_pts.append(pts[mask])
-            angles = fids[mask] * 2 * pi / len(self.frame_ids)
+            angles = fids[mask] * 2 * pi / self.number_of_img
             clean_angles.append(angles)
         return clean_pts, clean_angles
 
     def _legacy_estimate(self, clean_pts):
-        A = np.zeros((self.num, 4, 2))
-        U = np.zeros(self.num)
-        V = np.zeros(self.num)
+        A = np.zeros((self.num, 2))
         for k in range(self.num):
             pts = clean_pts[k]
             if len(pts) < 5:
                 continue
             ellipse = cv2.fitEllipse(pts.astype(np.float32))
             cx, cy = ellipse[0]
-            a, b = ellipse[1][0] / 2, ellipse[1][1] / 2
+            a = max(ellipse[1]) / 2
             theta_e = ellipse[2] / 180 * pi
-            if a < b:
-                a, b = b, a
-                theta_e -= pi / 2
-            cost = np.cos(theta_e)
-            sint = np.sin(theta_e)
-            U[k] = cx
-            V[k] = cy
-            A[k][3][0] = cx + a * cost
-            A[k][3][1] = cy + a * sint
-            A[k][2][0] = cx - a * cost
-            A[k][2][1] = cy - a * sint
-            A[k][0][0] = cx - b * sint
-            A[k][0][1] = cy + b * cost
-            A[k][1][0] = cx + b * sint
-            A[k][1][1] = cy - b * cost
-        X = A[:, 0]
-        Y = A[:, 1]
-        b1, a1 = np.polyfit(Y[1:], X[1:], 1)
+            A[k, 0] = cx + a * np.cos(theta_e)
+            A[k, 1] = cy + a * np.sin(theta_e)
+        tip_u = A[1:, 0]
+        tip_v = A[1:, 1]
+        b1, a1 = np.polyfit(tip_v, tip_u, 1)
         SDD = abs(b1) * self.dpixel
-        v0 = -a1 / b1
-        slope, intercept = np.polyfit(V[1:], U[1:], 1)
+        v0 = -a1 / b1 if abs(b1) > 1e-9 else self.h / 2.0
+        slope, intercept = np.polyfit(A[1:, 1], A[1:, 0], 1)
         theta = np.arctan(slope)
         u0 = intercept + slope * v0
         SOD_sum = 0.0
@@ -211,7 +198,7 @@ class Calibration:
             du = A[0, 0] - A[i, 0]
             dv = A[0, 1] - A[i, 1]
             dist = sqrt(du**2 + dv**2)
-            if dist > 0:
+            if dist > 1e-3:
                 SOD_sum += self.bead_spacing * (i - 1) * SDD / dist / self.dpixel
                 count += 1
         SOD = SOD_sum / count if count > 0 else 0.0
