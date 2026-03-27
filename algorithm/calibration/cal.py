@@ -274,7 +274,7 @@ class Calibration:
     def _refine(self, SOD0, SDD0, u0_0, v0_0, theta0, eta0, clean_pts, clean_angles):
         from scipy.optimize import least_squares
 
-        w, h = self.w, self.h
+        # ── 步骤1：用余弦拟合估计每颗球的 phi0 和 r（代替 argmax）──
         r_k_list = []
         phi0_k_list = []
         for k in range(self.num):
@@ -285,23 +285,42 @@ class Calibration:
                 continue
             u_vals = pts[:, 0]
             angles = clean_angles[k]
+            # 线性最小二乘：u = Ac*cos(phi) + As*sin(phi) + C
             A_mat = np.column_stack(
                 [np.cos(angles), np.sin(angles), np.ones(len(angles))]
             )
             coeffs, _, _, _ = np.linalg.lstsq(A_mat, u_vals, rcond=None)
             Ac, As, C = coeffs
+            # phi0 使得 r*cos(phi+phi0) = Ac*cos(phi) + As*sin(phi)
             phi0 = np.arctan2(-As, Ac)
-            r_fit = np.sqrt(Ac**2 + As**2)
-            r_est = r_fit * self.dpixel * SOD0 / SDD0
+            r_px = np.sqrt(Ac**2 + As**2)  # 幅度（像素）
+            r_est = r_px * self.dpixel * SOD0 / SDD0  # 转换为mm
             r_k_list.append(r_est)
             phi0_k_list.append(phi0)
-            print(f"  球 {k}: r_est={r_est:.2f}mm, phi0={np.degrees(phi0):.2f}°")
+            print(f"  球 {k}: r={r_est:.2f}mm, phi0={np.degrees(phi0):.2f}°")
 
+        # ── 步骤2：构建优化变量 x = [SOD, SDD, u0, v0, theta, eta, r0..r5, phi00..phi05] ──
+        w, h = self.w, self.h
         r_arr = np.array(r_k_list)
         phi0_arr = np.array(phi0_k_list)
+        x0 = np.concatenate([[SOD0, SDD0, u0_0, v0_0, theta0, eta0], r_arr, phi0_arr])
+        lb = (
+            [600, 700, w * 0.3, h * 0.3, -0.5, -0.5]
+            + [0.0] * self.num
+            + [-np.pi] * self.num
+        )
+        ub = (
+            [1500, 1800, w * 0.7, h * 0.7, 0.5, 0.5]
+            + [500.0] * self.num
+            + [np.pi] * self.num
+        )
+        bounds = (lb, ub)
 
-        def residuals_fixed_geom(params):
-            u0, v0, theta, eta = params
+        # ── 步骤3：残差函数（eta 公式与 generate_cone_vec 保持一致）──
+        def residuals(params):
+            SOD, SDD, u0, v0, theta, eta = params[:6]
+            r_arr_ = params[6 : 6 + self.num]
+            phi0_arr_ = params[6 + self.num : 6 + 2 * self.num]
             dpixel = self.dpixel
             res = []
             for k in range(self.num):
@@ -310,45 +329,54 @@ class Calibration:
                 if len(pts) < 3:
                     continue
                 z_k = k * self.bead_spacing
-                r_k, phi0_k = r_arr[k], phi0_arr[k]
+                r_k = r_arr_[k]
+                phi0_k = phi0_arr_[k]
                 for phi, u_obs, v_obs in zip(angles, pts[:, 0], pts[:, 1]):
                     x_k = r_k * np.cos(phi + phi0_k)
                     y_k = r_k * np.sin(phi + phi0_k)
-                    z_eff = z_k - eta * (SOD0 + y_k) * np.sin(phi)
-                    denom = SOD0 + y_k
-                    u_ideal = u0 + (SDD0 * x_k / denom) / dpixel
-                    v_ideal = v0 + (SDD0 * z_eff / denom) / dpixel
+                    denom = SOD + y_k
+                    # eta 修正：v 方向旋转轴 roll 分量，对应 cone_vec 中
+                    # v_base = [-eta*sin(phi), eta*cos(phi), 1] / norm
+                    # 近似（小 eta）：z_eff = z_k + eta * x_k
+                    z_eff = z_k + eta * x_k
+                    u_ideal = u0 + (SDD * x_k / denom) / dpixel
+                    v_ideal = v0 + (SDD * z_eff / denom) / dpixel
                     du_rel = u_ideal - u0
                     dv_rel = v_ideal - v0
                     u_pred = u0 + np.cos(theta) * du_rel - np.sin(theta) * dv_rel
                     v_pred = v0 + np.sin(theta) * du_rel + np.cos(theta) * dv_rel
-                    res.extend([u_pred - u_obs, v_pred - v_obs])
+                    res.append(u_pred - u_obs)
+                    res.append(v_pred - v_obs)
             return np.array(res)
 
-        x0_partial = np.array([u0_0, v0_0, theta0, eta0])
-        bounds_partial = ([w * 0.3, h * 0.3, -0.5, -1.0], [w * 0.7, h * 0.7, 0.5, 1.0])
-        initial_res = residuals_fixed_geom(x0_partial)
+        initial_res = residuals(x0)
         initial_rms = np.sqrt(np.mean(initial_res**2))
         print(f"Initial RMS: {initial_rms:.4f} pixels")
+
         result = least_squares(
-            residuals_fixed_geom,
-            x0_partial,
-            bounds=bounds_partial,
+            residuals,
+            x0,
+            bounds=bounds,
             method="trf",
             max_nfev=5000,
             ftol=1e-12,
             xtol=1e-12,
+            gtol=1e-12,
         )
-        final_res = residuals_fixed_geom(result.x)
+
+        final_res = residuals(result.x)
         final_rms = np.sqrt(np.mean(final_res**2))
         print(f"Final RMS: {final_rms:.4f} pixels")
-        u0, v0, theta, eta = result.x
-        names = ["u0", "v0", "theta", "eta"]
+
+        names = ["SOD", "SDD", "u0", "v0", "theta", "eta"]
         for i, n in enumerate(names):
+            print(f"  {n}: {result.x[i]:.6f}  (Δ={result.x[i] - x0[i]:+.6f})")
+        for k in range(self.num):
             print(
-                f"  {n}: {result.x[i]:.6f} (change: {result.x[i] - x0_partial[i]:+.6f})"
+                f"  r[{k}]={result.x[6 + k]:.3f}mm  phi0[{k}]={np.degrees(result.x[6 + self.num + k]):.2f}°"
             )
-        return (SOD0, SDD0, u0, v0, theta, eta, final_rms)
+
+        return tuple(result.x[:6])  # 只返回 6 个几何参数
 
     def calculate(self):
         if not self.detections:
@@ -356,13 +384,12 @@ class Calibration:
         clean_pts, clean_angles = self._build_clean_trajectories()
         SOD0, SDD0, u0_0, v0_0, theta0 = self._legacy_estimate(clean_pts)
         eta0 = 0.0
-        SOD, SDD, u0, v0, theta, eta, refine_rms = self._refine(
+        SOD, SDD, u0, v0, theta, eta = self._refine(
             SOD0, SDD0, u0_0, v0_0, theta0, eta0, clean_pts, clean_angles
         )
         if abs(SOD - 907) > 100 or abs(SDD - 971) > 100:
             print(
-                f"WARNING: Refine gave SOD={SOD:.1f}, SDD={SDD:.1f}, "
-                f"偏离初始值较大，请检查校准质量 (RMS={refine_rms:.3f}px)"
+                f"WARNING: Refine SOD={SOD:.1f}, SDD={SDD:.1f} 偏离初始值较大，请检查校准质量"
             )
         self.SOD = SOD
         self.SDD = SDD
