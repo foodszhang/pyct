@@ -127,7 +127,7 @@ class Detector:
         self.detector.GoLiveSeq(0, 4, self.scan_number)
         startCount = self.detector.GetFieldCount()
         fut_queue = queue.Queue()
-        send_queue = queue.Queue(maxsize=100)
+        send_queue = queue.Queue()
         exit_event = Event()
         cbData = CBData(
             startCount,
