@@ -5,6 +5,7 @@ from itk import RTK as rtk
 import os
 import cv2
 import numpy as np
+import nibabel as nib
 
 # Defines the image type
 ImageType = itk.Image[itk.F, 3]
@@ -36,16 +37,20 @@ for x in range(0, numberOfProjections):
 
 # Writing the geometry to disk
 xmlWriter = rtk.ThreeDCircularProjectionGeometryXMLFileWriter.New()
-xmlWriter.SetFilename('test.xml')
+xmlWriter.SetFilename("test.xml")
 xmlWriter.SetObject(geometry)
 xmlWriter.WriteFile()
 
 
 projectionsSource = itk.GetImageFromArray(img_stack)
-projOrigin = [ -TN/2 * dd, -TM/2 * dd, 0 ] #input images are 3072x2560 pixels with a 0.14mm pixel size
-projSpacing = [ dd, dd, 1.0 ]
-projectionsSource.SetOrigin( projOrigin )
-projectionsSource.SetSpacing( projSpacing )
+projOrigin = [
+    -TN / 2 * dd,
+    -TM / 2 * dd,
+    0,
+]  # input images are 3072x2560 pixels with a 0.14mm pixel size
+projSpacing = [dd, dd, 1.0]
+projectionsSource.SetOrigin(projOrigin)
+projectionsSource.SetSpacing(projSpacing)
 
 ConstantImageSourceType = rtk.ConstantImageSource[ImageType]
 
@@ -57,7 +62,7 @@ print("6666")
 # Create reconstructed image
 constantImageSource2 = ConstantImageSourceType.New()
 sizeOutput = [N, N, N]
-origin = [-(N-1)/2, -(N-1)/2, -(N-1)/2]
+origin = [-(N - 1) / 2, -(N - 1) / 2, -(N - 1) / 2]
 spacing = [1.0, 1.0, 1.0]
 constantImageSource2.SetOrigin(origin)
 constantImageSource2.SetSpacing(spacing)
@@ -73,12 +78,11 @@ feldkamp.SetInput(1, projectionsSource)
 feldkamp.SetGeometry(geometry)
 feldkamp.GetRampFilter().SetTruncationCorrection(0.0)
 feldkamp.GetRampFilter().SetHannCutFrequency(0.0)
-print('settover')
+print("settover")
 array = itk.GetArrayFromImage(feldkamp.GetOutput())
 import numpy as np
-print('!!!!',array.shape, array.dtype)
-array.tofile('test.raw')
+
+print("!!!!", array.shape, array.dtype)
+nii_out = nib.Nifti1Image(array, np.eye(4))
+nib.save(nii_out, "test.nii.gz")
 print("Done!")
-
-
-

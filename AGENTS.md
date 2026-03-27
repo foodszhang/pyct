@@ -155,3 +155,9 @@ def _backproject(img: np.ndarray, i: int, result_voxel: np.ndarray, ...):
 - 所有设置在 `config.yaml`
 - 配置段：`BrightController`、`CalibrationParam`、`ReconParam`、`ZolixMcController`
 - YAML加载：`yaml.load(open("config.yaml"), Loader=yaml.FullLoader)`
+
+## 执行长任务的方式
+对于可能超时的命令（安装包、编译、训练），
+必须用以下方式执行而不是直接运行：
+1. 用 nohup 或 & 后台运行，输出重定向到日志文件
+2. 然后轮询日志文件判断是否完成
