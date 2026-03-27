@@ -27,10 +27,20 @@ def detect_beads(img, n_expected=6, **kwargs):
         return detect_beads_hough(img, n_expected, **kwargs)
 
 
-def detect_beads_log(img, n_expected=6, min_sigma=3.0, max_sigma=12.0, threshold=0.03):
+def detect_beads_log(img, n_expected=6, min_sigma=8.0, max_sigma=25.0, threshold=0.01):
     img_f = img.astype(np.float64)
-    img_norm = (img_f - img_f.min()) / (img_f.max() - img_f.min() + 1e-12)
-    blobs = blob_log(img_norm, min_sigma, max_sigma, num_sigma=10, threshold=threshold)
+    lo, hi = img_f.min(), img_f.max()
+    if hi - lo < 1e-6:
+        return None
+    img_norm = (img_f - lo) / (hi - lo)
+    img_inv = 1.0 - img_norm
+    blobs = blob_log(
+        img_inv,
+        min_sigma=min_sigma,
+        max_sigma=max_sigma,
+        num_sigma=10,
+        threshold=threshold,
+    )
     if blobs is None or len(blobs) == 0:
         return None
     if len(blobs) < n_expected:
@@ -150,7 +160,7 @@ class Calibration:
             pts = traj[:, 1:3]
             mask = ransac_ellipse_clean(pts)
             clean_pts.append(pts[mask])
-            angles = fids[mask] * 2 * pi / len(self.frame_ids)
+            angles = fids[mask] * 2 * pi / self.number_of_img
             clean_angles.append(angles)
         return clean_pts, clean_angles
 
