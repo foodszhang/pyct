@@ -9,10 +9,10 @@ import os
 calibrated = dict(
     SOD=907.0,
     SDD=970.97,
-    u0=929.42,
-    v0=987.18,
-    theta=0.0376,
-    eta=0.0034,
+    u0=914.57,
+    v0=986.98,
+    theta=-0.00384,
+    eta=0.00128,
 )
 
 cb = ConeBeam(
