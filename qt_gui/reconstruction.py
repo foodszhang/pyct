@@ -12,6 +12,7 @@ from algorithm.astra.conebeam import ConeBeam
 from typing import Optional
 import yaml
 import numba as nb
+import nibabel as nib
 
 loader = QUiLoader()
 Config = yaml.load(open("config.yaml"), Loader=yaml.FullLoader)
@@ -40,6 +41,7 @@ class CTSliceView(QtWidgets.QWidget):
         if not self.imageItem:
             return
         self.max_window = value
+
     def set_window_low(self, value):
         if not self.imageItem:
             return
@@ -105,9 +107,7 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.use_scan_check_box = self.ui.findChild(
             QtWidgets.QCheckBox, "useScanCheckBox"
         )
-        self.use_ct_hu = self.ui.findChild(
-            QtWidgets.QCheckBox, "useCTHUCheckBox"
-        )
+        self.use_ct_hu = self.ui.findChild(QtWidgets.QCheckBox, "useCTHUCheckBox")
         self.voxel_pixel_size_line_edit = self.ui.findChild(
             QtWidgets.QLineEdit, "voxelPixelSizeLineEdit"
         )
@@ -245,15 +245,15 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             )
             cb.load_img()
         rec = cb.reconstruct()
-        rec.tofile("rec4.raw")
+        nii_img = nib.Nifti1Image(rec, np.eye(4))
+        nib.save(nii_img, "rec4.nii.gz")
         try:
-            full_filename = os.path.join(
-                self.parent_window.project_path, 'rec.raw'
-            )
-            rec.tofile(full_filename)
+            full_filename = os.path.join(self.parent_window.project_path, "rec.nii.gz")
+            nii_img = nib.Nifti1Image(rec, np.eye(4))
+            nib.save(nii_img, full_filename)
         except Exception as e:
-            print('!!!!!', e)
-        print('4444recon.shape', rec.shape, rec.dtype)
+            print("!!!!!", e)
+        print("4444recon.shape", rec.shape, rec.dtype)
         self.ReconDone.emit(rec)
         self.parent_window.tab_widget.setEnabled(True)
         self.save_config()

@@ -3,6 +3,7 @@ import cv2
 import numba as nb
 from typing import Optional, Callable
 import sys
+import nibabel as nib
 
 sini = np.sin(np.arange(360) * np.pi / 180)
 cosi = np.cos(np.arange(360) * np.pi / 180)
@@ -19,7 +20,6 @@ real = np.real
 ceil = np.ceil
 log2 = np.log2
 pi = np.pi
-
 
 
 @nb.jit(nopython=True, parallel=True)
@@ -47,7 +47,7 @@ def _backproject(
 ):
     sinii = np.sin(i * np.pi / 180)
     cosii = np.cos(i * np.pi / 180)
-    w = SOD/SDD
+    w = SOD / SDD
 
     for k1 in nb.prange(N):
         x = X[k1]
@@ -57,19 +57,19 @@ def _backproject(
             t = x * cosii + y * sinii
             s = -x * sinii + y * cosii
             InterpX = (SOD * t) / (SOD - s)
-            InterpW = (SOD ** 2) / ((SOD - s) ** 2)
+            InterpW = (SOD**2) / ((SOD - s) ** 2)
             InterpX = (InterpX - a_start) / a_delta
             for k3 in range(N):
                 z = Z[k3]
                 InterpY = (SOD * z) / (SOD - s)
                 InterpY = (InterpY - b_start) / b_delta
                 vq = interpolation(img, InterpX, InterpY, TN, TM)
-                #用k1, k2, k3的顺序可以极大的提高性能
-                #result_voxel[k1, k2, k3] += pf / U2 * 2 * np.pi
-                result_voxel[k1, k2, k3] += vq * InterpW  / 2
+                # 用k1, k2, k3的顺序可以极大的提高性能
+                # result_voxel[k1, k2, k3] += pf / U2 * 2 * np.pi
+                result_voxel[k1, k2, k3] += vq * InterpW / 2
 
 
-#@nb.jit(nopython=True)
+# @nb.jit(nopython=True)
 def _init(
     img: np.ndarray,
     TN: int,
@@ -77,7 +77,6 @@ def _init(
     aa: np.ndarray,
     bb: np.ndarray,
     SOD: float,
-
     filter: np.ndarray,
 ):
     """
@@ -87,8 +86,7 @@ def _init(
     weight = SOD / (np.sqrt(SOD**2 + aa**2 + bb**2))
     img = img * weight
     for y in range(TM):
-        tmp = real(ifft(
-            ifftshift(filter * fftshift(fft(img[y, :], ZeroPaddedLength)))))
+        tmp = real(ifft(ifftshift(filter * fftshift(fft(img[y, :], ZeroPaddedLength)))))
         img[y, :] = tmp[0:TN]
     return img
 
@@ -111,7 +109,17 @@ def interpolation(img: np.ndarray, x: float, y: float, N: int, M: int):
 class ConeBeam:
     N = 512
 
-    def __init__(self, SOD: float, dd: float, TN: int, TM: int, du: float,dv:float, phi: float, SDD: float):
+    def __init__(
+        self,
+        SOD: float,
+        dd: float,
+        TN: int,
+        TM: int,
+        du: float,
+        dv: float,
+        phi: float,
+        SDD: float,
+    ):
         self.SOD = SOD
         self.dd = dd
         self.TN = TN
@@ -133,32 +141,32 @@ class ConeBeam:
 
     @staticmethod
     def Filter(N, pixel_size, FilterType, cutoff):
-        '''
+        """
         TO DO: Ram-Lak filter implementation
                    Argument for name of filter
-        '''
+        """
         if cutoff > 0.5 or cutoff < 0:
-            raise Exception('Cutoff have to be pose between 0 and 0.5')
+            raise Exception("Cutoff have to be pose between 0 and 0.5")
         x = np.arange(0, N) - (N - 1) / 2
         h = np.zeros(len(x))
-        h[np.where(x == 0)] = 1 / (8 * pixel_size ** 2)
+        h[np.where(x == 0)] = 1 / (8 * pixel_size**2)
         odds = np.where(x % 2 == 1)
         h[odds] = -0.5 / (pi * pixel_size * x[odds]) ** 2
         h = h[0:-1]
         filter = abs(fftshift(fft(h))) * 2
         w = 2 * pi * x[0:-1] / (N - 1)
-        if FilterType == 'ram-lak':
+        if FilterType == "ram-lak":
             pass  # Do nothing
-        elif FilterType == 'shepp-logan':
+        elif FilterType == "shepp-logan":
             zero = np.where(w == 0)
             tmp = filter[zero]
             filter = filter * sin(w / (2 * cutoff)) / (w / (2 * cutoff))
             filter[zero] = tmp * sin(w[zero] / (2 * cutoff))
-        elif FilterType == 'cosine':
+        elif FilterType == "cosine":
             filter = filter * cos(w / (2 * cutoff))
-        elif FilterType == 'hamming':
+        elif FilterType == "hamming":
             filter = filter * (0.54 + 0.46 * (cos(w / cutoff)))
-        elif FilterType == 'hann':
+        elif FilterType == "hann":
             filter = filter * (0.5 + 0.5 * cos(w / cutoff))
 
         filter[np.where(abs(w) > pi * cutoff)] = 0
@@ -199,8 +207,8 @@ class ConeBeam:
         """
         a = (np.arange(self.TN) - self.TN / 2) * self.dd
         b = (np.arange(self.TM) - self.TM / 2) * self.dd
-        a  = a * self.SOD / self.SDD
-        b  = b * self.SOD / self.SDD
+        a = a * self.SOD / self.SDD
+        b = b * self.SOD / self.SDD
         self.a = a
         self.b = b
         aa, bb = np.meshgrid(a, b)
@@ -243,38 +251,48 @@ if __name__ == "__main__":
     import os
     import time
 
-    #fdk = ConeBeam(SOD=665.188, dd=0.0748, TN=1536, TM=1944, du=14.6883, phi=-0.83178, SDD=721.49)
-    #fdk = ConeBeam(SOD=876.4573, dd=0.0748, TN=1536, TM=1944, du=6.35,dv=-159.47, phi=-0.83178, SDD=945.7286)
-    fdk = ConeBeam(SOD=722.679, dd=0.0748, TN=1536, TM=1944, du=6.35,dv=-159.47, phi=-0.83178, SDD=778.676)
-    #filter = fdk.gen_filter(fdk.dd, fdk.TN)
+    # fdk = ConeBeam(SOD=665.188, dd=0.0748, TN=1536, TM=1944, du=14.6883, phi=-0.83178, SDD=721.49)
+    # fdk = ConeBeam(SOD=876.4573, dd=0.0748, TN=1536, TM=1944, du=6.35,dv=-159.47, phi=-0.83178, SDD=945.7286)
+    fdk = ConeBeam(
+        SOD=722.679,
+        dd=0.0748,
+        TN=1536,
+        TM=1944,
+        du=6.35,
+        dv=-159.47,
+        phi=-0.83178,
+        SDD=778.676,
+    )
+    # filter = fdk.gen_filter(fdk.dd, fdk.TN)
     ZeroPaddedLength = int(2 ** (ceil(log2(2 * (fdk.TN - 1)))))
     filter = ConeBeam.Filter(
-        ZeroPaddedLength + 1, fdk.dd * fdk.SOD / (fdk.SDD), 'hamming', 0.3)
+        ZeroPaddedLength + 1, fdk.dd * fdk.SOD / (fdk.SDD), "hamming", 0.3
+    )
     for i in range(720):
         if os.path.exists(f"../data/alway/{i}.tif"):
             print(f"{i}.tif")
             img = cv2.imread(f"../data/alway/{i}.tif", -1)
             time1 = time.time()
-        #if os.path.exists(f"../data/alway1/{i}.tif"):
-        #    print(f"{i}.tif")
-        #    img = cv2.imread(f"../data/alway1/{i}.tif", -1)
-        #    time1 = time.time()
-        #if os.path.exists("../data/1214mouse/g{:04d}.prj".format(i)):
-        ##    print(f"{i}.tif")
-        ##    img = cv2.imread(f"../data/alway1/{i}.tif", -1)
-        ##    time1 = time.time()
-        #    img = np.fromfile("../data/1214mouse/g{:04d}.prj".format(i), dtype=np.uint16).reshape((fdk.TM, fdk.TN))
+            # if os.path.exists(f"../data/alway1/{i}.tif"):
+            #    print(f"{i}.tif")
+            #    img = cv2.imread(f"../data/alway1/{i}.tif", -1)
+            #    time1 = time.time()
+            # if os.path.exists("../data/1214mouse/g{:04d}.prj".format(i)):
+            ##    print(f"{i}.tif")
+            ##    img = cv2.imread(f"../data/alway1/{i}.tif", -1)
+            ##    time1 = time.time()
+            #    img = np.fromfile("../data/1214mouse/g{:04d}.prj".format(i), dtype=np.uint16).reshape((fdk.TM, fdk.TN))
 
-            #进行高斯模糊
+            # 进行高斯模糊
             img = fdk.init(img, filter)
-            #cv2.normalize(img, img, 0, 255, cv2.NORM_MINMAX)
-            #img = img.astype(np.uint8)
-            #cv2.imshow("img", img)
-            #cv2.waitKey(0)
-            #sys.exit(0)
+            # cv2.normalize(img, img, 0, 255, cv2.NORM_MINMAX)
+            # img = img.astype(np.uint8)
+            # cv2.imshow("img", img)
+            # cv2.waitKey(0)
+            # sys.exit(0)
             time1 = time.time()
             fdk.backproject(img, i * 0.5)
-            print('backproject', time.time() - time1)
+            print("backproject", time.time() - time1)
             del img
 
     cv2.normalize(fdk.result_voxel, fdk.result_voxel, 0, 255, cv2.NORM_MINMAX)
@@ -288,4 +306,5 @@ if __name__ == "__main__":
     cv2.waitKey(0)
     cv2.destroyAllWindows()
     # 反投影
-    ni.tofile("ni2.raw")
+    nii_out = nib.Nifti1Image(ni, np.eye(4))
+    nib.save(nii_out, "ni2.nii.gz")
