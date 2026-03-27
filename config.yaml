@@ -1,0 +1,30 @@
+BrightController:
+  baudrate: 38400
+  port: COM3
+  timeout: 4
+CalibrationParam:
+  BBNumber: 6
+  detectorHeight: 1944
+  detectorPixelSize: 0.0748
+  detectorWidth: 1536
+ReconParam:
+  SDD: '978.11'
+  SOD: '910.7'
+  angle: '1'
+  columnCount: '512'
+  detectorX: '751.77'
+  detectorY: '1013.91'
+  rescale_intercept: -502.588
+  rescale_slope: -7.99
+  rotation: '0.2'
+  rowCount: '512'
+  voxelPixelSize: '0.25'
+  voxelSizeX: '512'
+  voxelSizeY: '512'
+  voxelSizeZ: '512'
+  xSpacing: '0.2244'
+  ySpacing: '0.284'
+ZolixMcController:
+  baudrate: 19200
+  port: COM4
+  timeout: 400

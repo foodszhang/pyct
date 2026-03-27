@@ -1,0 +1,8 @@
+pyserial
+#typer[all]
+pyyaml
+dearpygui
+opencv-python
+dearpygui_ext
+#itk==v5.4rc01
+#itk-rtk

@@ -1,0 +1,20 @@
+def read_circle(i):
+    if not os.path.exists(f'../../data/123-2/{i}.tif'):
+        return None
+    img = cv2.imread(f'../../data/123-2/{i}.tif', -1)
+    img = cv2.GaussianBlur(img,(5,5),0)
+    img = cv2.medianBlur(img,5)
+    simg = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
+    simg = simg.astype(np.uint8)
+    circles = hough_circles(simg)
+    if len(circles) != 6 and len(circles) != 0:
+        threshold = circle_threshold(simg, circles[0])
+        th = np.where((simg <= threshold[1]) & (simg >= threshold[0]), simg, 255)
+        circles = hough_circles(th)
+        if len(circles) != 6:
+            for  circle in circles:
+                cv2.circle(th, (int(circle[0]), int(circle[1])), int(circle[2]), 125, 1)
+            cv2.imwrite(f'c{i}.tif', th)
+            print('eeror in ', i)
+            return None
+    return [(x[0], x[1]) for x in circles]
