@@ -86,14 +86,16 @@ class ScanWindow(QtWidgets.QDialog):
     def save_img(self, img, cnt):
         full_filename = os.path.join(self.parent_window.project_path, f"{cnt}.tif")
         print("saved", full_filename)
-        img = cv2.normalize(img, None, 0, 65535, cv2.NORM_MINMAX)
-        img = img.astype(np.uint16)
+        img = np.clip(img, 0, 1)
+        img = (img * 65535).astype(np.uint16)
         cv2.imwrite(full_filename, img)
 
     def scan_thread(self):
         config = Config.get("ZolixMcController", None)
         if not config:
-            QtWidgets.QMessageBox.critical(self, "警告", "转台控制器配置出错!请检查config.yaml文件")
+            QtWidgets.QMessageBox.critical(
+                self, "警告", "转台控制器配置出错!请检查config.yaml文件"
+            )
             return
         controller = ZolixMcController(config["port"], config["baudrate"])
         server_thread = Thread(
@@ -105,7 +107,9 @@ class ScanWindow(QtWidgets.QDialog):
         py34 = os.environ.get("py34", "")
         if not py34:
             QtWidgets.QMessageBox.critical(
-                self, "警告", "py34环境变量未配置!请检查系统环境变量, 保证py34环境变量指向3.4版本python.exe的路径"
+                self,
+                "警告",
+                "py34环境变量未配置!请检查系统环境变量, 保证py34环境变量指向3.4版本python.exe的路径",
             )
             return
 
