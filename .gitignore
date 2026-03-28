@@ -59,6 +59,7 @@ htmlcov/
 *.raw
 !.gitkeep
 *.png
+recon_output/
 
 # Logs
 *.log

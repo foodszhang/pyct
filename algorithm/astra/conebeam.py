@@ -178,6 +178,10 @@ class ConeBeam:
 
 if __name__ == "__main__":
     import nibabel as nib
+    import os
+
+    output_dir = "/home/foods/pro/pyct_old/pyct/recon_output/phaseB/"
+    os.makedirs(output_dir, exist_ok=True)
 
     cb = ConeBeam(
         SOD=910.7,
@@ -206,6 +210,7 @@ if __name__ == "__main__":
     print(rec.shape, rec.dtype)
 
     # Save volume
+    nii_path = os.path.join(output_dir, "phaseB_rec.nii.gz")
     nii_img = nib.Nifti1Image(rec, np.eye(4))
-    nib.save(nii_img, "phaseB_rec.nii.gz")
-    print("Saved phaseB_rec.nii.gz")
+    nib.save(nii_img, nii_path)
+    print(f"Saved {nii_path}")
