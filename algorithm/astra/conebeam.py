@@ -25,7 +25,6 @@ class ConeBeam:
         proj_path: str,
         detectorX: float,
         detectorY: float,
-        rotation_angle: float,
         useHu: bool,
         rescale_slope: float,
         rescale_intercept: float,
@@ -50,7 +49,6 @@ class ConeBeam:
         self.number_of_img = number_of_img
         self.detectorX_raw = detectorX
         self.detectorY_raw = detectorY
-        self.rotation_angle = rotation_angle
         self.vol_geom = ast.create_vol_geom(NX, NY, NZ)
         self.rec_id = ast.data3d.create("-vol", self.vol_geom)
         self.ThreadPoolExecutor = ThreadPoolExecutor(max_workers=20)
@@ -75,17 +73,10 @@ class ConeBeam:
         for n, v in enumerate(img_list):
             i, img = v
             simg = img
-            rotation_mat = cv2.getRotationMatrix2D(
-                (self.detectorX_recon, self.detectorY_recon), self.rotation_angle, 1
-            )
             TM, TN = simg.shape
             self.w = TN
             self.h = TM
-            max_img = np.max(simg)
-            reshaped = cv2.warpAffine(
-                simg, rotation_mat, (TN, TM), borderValue=float(max_img)
-            )
-            reshaped = cv2.resize(reshaped, (self.TN, self.TM))
+            reshaped = cv2.resize(simg, (self.TN, self.TM))
             self.data[:, n, :] = reshaped
         angles = list(img_dict.keys())
         perAngle = 2 * np.pi / self.number_of_img
@@ -110,17 +101,10 @@ class ConeBeam:
         if os.path.exists(full_path):
             img = cv2.imread(full_path, -1)
             simg = img
-            rotation_mat = cv2.getRotationMatrix2D(
-                (self.detectorX_recon, self.detectorY_recon), -self.rotation_angle, 1
-            )
             TM, TN = simg.shape
             self.w = TN
             self.h = TM
-            max_img = np.max(simg)
-            reshaped = cv2.warpAffine(
-                simg, rotation_mat, (TN, TM), borderValue=float(max_img)
-            )
-            reshaped = cv2.resize(reshaped, (self.TN, self.TM))
+            reshaped = cv2.resize(simg, (self.TN, self.TM))
             self.data_lock.acquire()
             self.data[:, number, :] = reshaped
             self.data_lock.release()
@@ -165,7 +149,7 @@ class ConeBeam:
         self.proj_geom = ast.geom_postalignment(self.proj_geom, (du, dv))
         self.proj_id = ast.data3d.create("-proj3d", self.proj_geom, self.data)
 
-        print(f"[Phase A] 768x972 scheme:")
+        print(f"[Phase B] 768x972 scheme, NO rotation_angle:")
         print(
             f"  detectorX_recon = {self.detectorX_recon:.3f}, detectorY_recon = {self.detectorY_recon:.3f}"
         )
@@ -193,6 +177,8 @@ class ConeBeam:
 
 
 if __name__ == "__main__":
+    import nibabel as nib
+
     cb = ConeBeam(
         SOD=910.7,
         TN=768,
@@ -205,10 +191,9 @@ if __name__ == "__main__":
         dd_column=0.0748,
         voxel_size=0.25,
         number_of_img=360,
-        proj_path=r"../../data/123-2/",
+        proj_path=r"/home/foods/pro/data/20260327-jz-1/",
         detectorX=751.77,
         detectorY=1013.91,
-        rotation_angle=-0.35,
         pixel_size_raw=0.0748,
         sx=0.5,
         sy=0.5,
@@ -219,3 +204,8 @@ if __name__ == "__main__":
     cb.load_img()
     rec = cb.reconstruct()
     print(rec.shape, rec.dtype)
+
+    # Save volume
+    nii_img = nib.Nifti1Image(rec, np.eye(4))
+    nib.save(nii_img, "phaseB_rec.nii.gz")
+    print("Saved phaseB_rec.nii.gz")
