@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 import sys
 
+
 class ConeBeam:
     def __init__(
         self,
@@ -28,6 +29,9 @@ class ConeBeam:
         useHu: bool,
         rescale_slope: float,
         rescale_intercept: float,
+        pixel_size_raw: float = 0.0748,
+        sx: float = 0.5,
+        sy: float = 0.5,
     ):
         self.SOD = SOD
         self.SDD = SDD
@@ -36,13 +40,16 @@ class ConeBeam:
         self.NZ = NZ
         self.TM = TM
         self.TN = TN
-        self.dd_x = dd_column
-        self.dd_y = dd_row
-        self.dd = voxel_size
+        self.dd_x_raw = dd_column
+        self.dd_y_raw = dd_row
+        self.voxel_size = voxel_size
+        self.pixel_size_raw = pixel_size_raw
+        self.sx = sx
+        self.sy = sy
         self.proj_path = proj_path
         self.number_of_img = number_of_img
-        self.detectorX = detectorX
-        self.detectorY = detectorY
+        self.detectorX_raw = detectorX
+        self.detectorY_raw = detectorY
         self.rotation_angle = rotation_angle
         self.vol_geom = ast.create_vol_geom(NX, NY, NZ)
         self.rec_id = ast.data3d.create("-vol", self.vol_geom)
@@ -58,19 +65,26 @@ class ConeBeam:
         self.data = np.zeros((self.TM, len(img_dict), self.TN), dtype=np.float32)
         img_list = list(img_dict.items())
         img_list = sorted(img_list, key=lambda x: x[0])
+
+        self.detectorX_recon = self.detectorX_raw * self.sx
+        self.detectorY_recon = self.detectorY_raw * self.sy
+        self.dd_x_recon = self.pixel_size_raw / self.sx
+        self.dd_y_recon = self.pixel_size_raw / self.sy
+
         TM, TN = 0, 0
         for n, v in enumerate(img_list):
             i, img = v
             simg = img
             rotation_mat = cv2.getRotationMatrix2D(
-                (self.detectorX, self.detectorY), self.rotation_angle, 1
+                (self.detectorX_recon, self.detectorY_recon), self.rotation_angle, 1
             )
             TM, TN = simg.shape
             self.w = TN
             self.h = TM
             max_img = np.max(simg)
             reshaped = cv2.warpAffine(
-                simg, rotation_mat, (TN, TM), borderValue=float(max_img))
+                simg, rotation_mat, (TN, TM), borderValue=float(max_img)
+            )
             reshaped = cv2.resize(reshaped, (self.TN, self.TM))
             self.data[:, n, :] = reshaped
         angles = list(img_dict.keys())
@@ -78,17 +92,17 @@ class ConeBeam:
         angles = [i * perAngle for i in angles]
         self.proj_geom = ast.create_proj_geom(
             "cone",
-            self.dd_y / self.dd,
-            self.dd_x / self.dd,
+            self.dd_y_recon / self.voxel_size,
+            self.dd_x_recon / self.voxel_size,
             self.TM,
             self.TN,
             angles,
-            self.SOD / self.dd,
-            (self.SDD - self.SOD) / self.dd,
+            self.SOD / self.voxel_size,
+            (self.SDD - self.SOD) / self.voxel_size,
         )
-        center  = TN / 2, TM/ 2
-
-        self.proj_geom = ast.geom_postalignment(self.proj_geom, (self.du, self.dv))
+        du = self.TN / 2 - self.detectorX_recon
+        dv = self.detectorY_recon - self.TM / 2
+        self.proj_geom = ast.geom_postalignment(self.proj_geom, (du, dv))
 
     def load_img_thread(self, i, number):
         full_path = os.path.join(self.proj_path, f"{i}.tif")
@@ -96,16 +110,16 @@ class ConeBeam:
         if os.path.exists(full_path):
             img = cv2.imread(full_path, -1)
             simg = img
-            # 这里旋转角度是负数是实验的得到的有待进一步验证
             rotation_mat = cv2.getRotationMatrix2D(
-                (self.detectorX, self.detectorY), -self.rotation_angle, 1
+                (self.detectorX_recon, self.detectorY_recon), -self.rotation_angle, 1
             )
             TM, TN = simg.shape
             self.w = TN
             self.h = TM
             max_img = np.max(simg)
             reshaped = cv2.warpAffine(
-                simg, rotation_mat, (TN, TM), borderValue=float(max_img))
+                simg, rotation_mat, (TN, TM), borderValue=float(max_img)
+            )
             reshaped = cv2.resize(reshaped, (self.TN, self.TM))
             self.data_lock.acquire()
             self.data[:, number, :] = reshaped
@@ -121,10 +135,14 @@ class ConeBeam:
         for i in range(self.number_of_img):
             full_path = os.path.join(self.proj_path, f"{i}.tif")
             if os.path.exists(full_path):
-                count+=1
+                count += 1
                 numbers.append(i)
         self.data = np.zeros((self.TM, count, self.TN), dtype=np.float32)
 
+        self.detectorX_recon = self.detectorX_raw * self.sx
+        self.detectorY_recon = self.detectorY_raw * self.sy
+        self.dd_x_recon = self.pixel_size_raw / self.sx
+        self.dd_y_recon = self.pixel_size_raw / self.sy
 
         for n, i in enumerate(numbers):
             futs.append(self.ThreadPoolExecutor.submit(self.load_img_thread, i, n))
@@ -134,19 +152,27 @@ class ConeBeam:
 
         self.proj_geom = ast.create_proj_geom(
             "cone",
-            self.dd_y / self.dd,
-            self.dd_x / self.dd,
+            self.dd_y_recon / self.voxel_size,
+            self.dd_x_recon / self.voxel_size,
             self.TM,
             self.TN,
             self.angles,
-            self.SOD / self.dd,
-            (self.SDD - self.SOD) / self.dd,
+            self.SOD / self.voxel_size,
+            (self.SDD - self.SOD) / self.voxel_size,
         )
-        # 这里du，dv是实验得到的， astra的具体坐标系不太清楚
-        du = (self.w/2-self.detectorX) * self.TN /self.w
-        dv = (self.detectorY - self.h / 2) * self.TM / self.h
+        du = self.TN / 2 - self.detectorX_recon
+        dv = self.detectorY_recon - self.TM / 2
         self.proj_geom = ast.geom_postalignment(self.proj_geom, (du, dv))
         self.proj_id = ast.data3d.create("-proj3d", self.proj_geom, self.data)
+
+        print(f"[Phase A] 768x972 scheme:")
+        print(
+            f"  detectorX_recon = {self.detectorX_recon:.3f}, detectorY_recon = {self.detectorY_recon:.3f}"
+        )
+        print(
+            f"  dd_x_recon = {self.dd_x_recon:.4f}, dd_y_recon = {self.dd_y_recon:.4f}"
+        )
+        print(f"  du = {du:.3f}, dv = {dv:.3f}")
 
     def reconstruct(self):
         # self.cfg_fdk = ast.astra_dict('SIRT3D_CUDA')
@@ -167,26 +193,28 @@ class ConeBeam:
 
 
 if __name__ == "__main__":
-    N = 512
-    TM = 1944
-    TN = 1536
-    # cb = ConeBeam(SOD=722.679, TN=512, TM=512,  SDD=778.676, N = 512, dd_row=0.2840,dd_column=0.2244, voxel_size=0.2, number_of_img=360, proj_path=r"../../data/alway1", du=du, dv=-dv, dark_file='../../data/dark.tif', empty_file='../../data/empty.tif')
     cb = ConeBeam(
-        SOD=910,
-        TN=512,
-        TM=512,
-        SDD=979.239,
+        SOD=910.7,
+        TN=768,
+        TM=972,
+        SDD=978.11,
         NX=512,
         NY=512,
         NZ=512,
-        dd_row=0.2840,
-        dd_column=0.2244,
-        voxel_size=0.22,
+        dd_row=0.0748,
+        dd_column=0.0748,
+        voxel_size=0.25,
         number_of_img=360,
         proj_path=r"../../data/123-2/",
-        detectorX=750,
-        detectorY=1013,
+        detectorX=751.77,
+        detectorY=1013.91,
         rotation_angle=-0.35,
+        pixel_size_raw=0.0748,
+        sx=0.5,
+        sy=0.5,
+        useHu=False,
+        rescale_slope=1.0,
+        rescale_intercept=0.0,
     )
     cb.load_img()
     rec = cb.reconstruct()
