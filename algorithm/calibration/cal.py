@@ -111,10 +111,12 @@ class Calibration:
         for k in range(6):
             phi_list = []
             u_list = []
+            v_list = []
             for phi, bead_idx, u, v in observations:
                 if bead_idx == k:
                     phi_list.append(phi)
                     u_list.append(u)
+                    v_list.append(v)
 
             if len(phi_list) < 3:
                 print(
@@ -124,6 +126,7 @@ class Calibration:
 
             phi_arr = np.array(phi_list)
             u_arr = np.array(u_list)
+            mean_v = np.mean(np.array(v_list))
 
             H = np.column_stack(
                 [np.ones(len(phi_arr)), np.cos(phi_arr), np.sin(phi_arr)]
@@ -132,7 +135,7 @@ class Calibration:
 
             bead_positions[k, 0] = A_cos * du * SOD / SDD
             bead_positions[k, 1] = A_sin * du * SOD / SDD
-            bead_positions[k, 2] = (2.5 - k) * 10.0
+            bead_positions[k, 2] = (v0 - mean_v) * du * SOD / SDD
 
         return bead_positions
 
