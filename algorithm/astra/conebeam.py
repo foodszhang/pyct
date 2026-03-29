@@ -58,6 +58,9 @@ class ConeBeam:
         self.use_hu = useHu
         self.rescale_slope = rescale_slope
         self.rescale_intercept = rescale_intercept
+        self.I0 = 65535.0
+        self.eta = 0.0
+        print(f"[Geometry] eta = {self.eta}")
 
     def load_from_dict(self, img_dict):
         self.data = np.zeros((self.TM, len(img_dict), self.TN), dtype=np.float32)
@@ -72,39 +75,90 @@ class ConeBeam:
         TM, TN = 0, 0
         for n, v in enumerate(img_list):
             i, img = v
-            simg = img
+            simg = img.astype(np.float32)
             TM, TN = simg.shape
             self.w = TN
             self.h = TM
             reshaped = cv2.resize(simg, (self.TN, self.TM))
+            reshaped = np.clip(reshaped, 1.0, self.I0)
+            reshaped = -np.log(reshaped / self.I0)
             self.data[:, n, :] = reshaped
         angles = list(img_dict.keys())
         perAngle = 2 * np.pi / self.number_of_img
         angles = [i * perAngle for i in angles]
-        self.proj_geom = ast.create_proj_geom(
-            "cone",
-            self.dd_y_recon / self.voxel_size,
-            self.dd_x_recon / self.voxel_size,
-            self.TM,
-            self.TN,
+        vectors = self.build_cone_vec(
             angles,
-            self.SOD / self.voxel_size,
-            (self.SDD - self.SOD) / self.voxel_size,
+            self.SOD,
+            self.SDD,
+            self.detectorX_recon,
+            self.detectorY_recon,
+            eta=self.eta,
         )
-        du = self.TN / 2 - self.detectorX_recon
-        dv = self.detectorY_recon - self.TM / 2
-        self.proj_geom = ast.geom_postalignment(self.proj_geom, (du, dv))
+        self.proj_geom = ast.create_proj_geom("cone_vec", self.TM, self.TN, vectors)
+
+    def build_cone_vec(self, angles, SOD, SDD, u0, v0, eta=0.0):
+        """
+        构建 ASTRA cone_vec 几何矩阵。
+
+        参数（全部为物理量，单位 mm 或 弧度）：
+        - angles : ndarray, 每张投影对应的旋转角 (rad)
+        - SOD    : float, 源到旋转中心距离 (mm)
+        - SDD    : float, 源到探测器距离 (mm)
+        - u0     : float, 光轴打到探测器的水平像素坐标（缩放后图像坐标系）
+        - v0     : float, 光轴打到探测器的竖直像素坐标（缩放后图像坐标系）
+        - eta    : float, 探测器倾斜参数（无量纲）
+        """
+        ODD = SDD - SOD
+
+        du = self.pixel_size_raw / self.sx
+        dv = self.pixel_size_raw / self.sy
+
+        n_angles = len(angles)
+        vectors = np.zeros((n_angles, 12))
+
+        for i, phi in enumerate(angles):
+            sp = np.sin(phi)
+            cp = np.cos(phi)
+
+            srcX = sp * SOD / self.voxel_size
+            srcY = -cp * SOD / self.voxel_size
+            srcZ = 0.0
+
+            uX = cp * du / self.voxel_size
+            uY = sp * du / self.voxel_size
+            uZ = 0.0
+
+            vX = -eta * sp * dv / self.voxel_size
+            vY = eta * cp * dv / self.voxel_size
+            vZ = -1.0 * dv / self.voxel_size
+
+            dX_on_axis = -sp * ODD / self.voxel_size
+            dY_on_axis = cp * ODD / self.voxel_size
+            dZ_on_axis = 0.0
+
+            shift_u_pix = self.TN / 2.0 - u0
+            shift_v_pix = self.TM / 2.0 - v0
+
+            dX = dX_on_axis + shift_u_pix * uX + shift_v_pix * vX
+            dY = dY_on_axis + shift_u_pix * uY + shift_v_pix * vY
+            dZ = dZ_on_axis + shift_u_pix * uZ + shift_v_pix * vZ
+
+            vectors[i] = [srcX, srcY, srcZ, dX, dY, dZ, uX, uY, uZ, vX, vY, vZ]
+
+        return vectors
 
     def load_img_thread(self, i, number):
         full_path = os.path.join(self.proj_path, f"{i}.tif")
         TM, TN = 0, 0
         if os.path.exists(full_path):
             img = cv2.imread(full_path, -1)
-            simg = img
+            simg = img.astype(np.float32)
             TM, TN = simg.shape
             self.w = TN
             self.h = TM
             reshaped = cv2.resize(simg, (self.TN, self.TM))
+            reshaped = np.clip(reshaped, 1.0, self.I0)
+            reshaped = -np.log(reshaped / self.I0)
             self.data_lock.acquire()
             self.data[:, number, :] = reshaped
             self.data_lock.release()
@@ -134,29 +188,28 @@ class ConeBeam:
             fut.result()
         self.angles = [i * 2 * np.pi / self.number_of_img for i in numbers]
 
-        self.proj_geom = ast.create_proj_geom(
-            "cone",
-            self.dd_y_recon / self.voxel_size,
-            self.dd_x_recon / self.voxel_size,
-            self.TM,
-            self.TN,
+        vectors = self.build_cone_vec(
             self.angles,
-            self.SOD / self.voxel_size,
-            (self.SDD - self.SOD) / self.voxel_size,
+            self.SOD,
+            self.SDD,
+            self.detectorX_recon,
+            self.detectorY_recon,
+            eta=self.eta,
         )
-        du = self.TN / 2 - self.detectorX_recon
-        dv = self.detectorY_recon - self.TM / 2
-        self.proj_geom = ast.geom_postalignment(self.proj_geom, (du, dv))
+        self.proj_geom = ast.create_proj_geom("cone_vec", self.TM, self.TN, vectors)
         self.proj_id = ast.data3d.create("-proj3d", self.proj_geom, self.data)
 
-        print(f"[Phase B] 768x972 scheme, NO rotation_angle:")
-        print(
-            f"  detectorX_recon = {self.detectorX_recon:.3f}, detectorY_recon = {self.detectorY_recon:.3f}"
-        )
-        print(
-            f"  dd_x_recon = {self.dd_x_recon:.4f}, dd_y_recon = {self.dd_y_recon:.4f}"
-        )
-        print(f"  du = {du:.3f}, dv = {dv:.3f}")
+        print("[Geometry] Using cone_vec geometry (no postalignment)")
+        print(f"[Geometry] SOD = {self.SOD}, SDD = {self.SDD}")
+        print(f"[Geometry] u0 = {self.detectorX_recon}, v0 = {self.detectorY_recon}")
+        print(f"[Geometry] eta = {self.eta}")
+
+        print("[Preprocess] Using Beer-Lambert projection: -log(I/I0)")
+        print(f"[Preprocess] I0 = {self.I0}")
+        print(f"[Preprocess] data shape = {self.data.shape}")
+        print(f"[Preprocess] data min = {self.data.min():.6f}")
+        print(f"[Preprocess] data max = {self.data.max():.6f}")
+        print(f"[Preprocess] data mean = {self.data.mean():.6f}")
 
     def reconstruct(self):
         # self.cfg_fdk = ast.astra_dict('SIRT3D_CUDA')
@@ -170,9 +223,15 @@ class ConeBeam:
         ast.algorithm.delete(alg_id)
         ast.data3d.delete(self.rec_id)
         ast.data3d.delete(self.proj_id)
-        print("finish rec", self.use_hu)
         if self.use_hu:
-            ar = self.rescale_slope * ar + self.rescale_intercept
+            print(
+                "[HU] useHu=True was requested, but HU conversion is disabled in current debug stage"
+            )
+        print("[HU] Disabled in current debug stage")
+        print("[Reconstruction] Returning raw attenuation reconstruction")
+        print(f"[Reconstruction] min = {ar.min():.6f}")
+        print(f"[Reconstruction] max = {ar.max():.6f}")
+        print(f"[Reconstruction] mean = {ar.mean():.6f}")
         return ar
 
 
