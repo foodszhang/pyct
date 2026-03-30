@@ -95,6 +95,8 @@ class ConeBeam:
             self.detectorX_recon,
             self.detectorY_recon,
             eta=self.eta,
+            vc=self.vc,
+            vs=self.vs,
         )
         self.proj_geom = ast.create_proj_geom("cone_vec", self.TM, self.TN, vectors)
 
@@ -141,7 +143,7 @@ class ConeBeam:
             dZ_on_axis = 0.0
 
             shift_u_pix = self.TN / 2.0 - u0
-            v_shift = vc * cp + vs * sp
+            v_shift = -(vc * cp + vs * sp)
             shift_v_pix = self.TM / 2.0 - v0 + v_shift
 
             dX = dX_on_axis + shift_u_pix * uX + shift_v_pix * vX
@@ -246,7 +248,7 @@ if __name__ == "__main__":
     import nibabel as nib
     import os
 
-    output_dir = "/home/foods/pro/pyct_old/pyct/recon_output/phaseD_calibrated/"
+    output_dir = "/home/foods/pro/pyct_old/pyct/recon_output/phaseD_calibrated_v2/"
     os.makedirs(output_dir, exist_ok=True)
 
     cb = ConeBeam(
@@ -288,12 +290,12 @@ if __name__ == "__main__":
     rec_raw = rec.astype(np.float32)
     rec_scaled = (rec / rec.max() * 1000).astype(np.int16)
 
-    nii_path_raw = os.path.join(output_dir, "phaseD_calibrated_rec_raw.nii.gz")
+    nii_path_raw = os.path.join(output_dir, "phaseD_calibrated_v2_rec_raw.nii.gz")
     nii_img_raw = nib.Nifti1Image(rec_raw, np.eye(4))
     nib.save(nii_img_raw, nii_path_raw)
     print(f"Saved {nii_path_raw}")
 
-    nii_path = os.path.join(output_dir, "phaseD_calibrated_rec.nii.gz")
+    nii_path = os.path.join(output_dir, "phaseD_calibrated_v2_rec.nii.gz")
     nii_img = nib.Nifti1Image(rec_scaled, np.eye(4))
     nib.save(nii_img, nii_path)
     print(f"Saved {nii_path}")
