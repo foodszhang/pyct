@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 import sys
 import numba as nb
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize_scalar, least_squares
 
 
 @nb.jit(nopython=True)
@@ -104,9 +104,10 @@ class Calibration:
             du: 像素间距 mm/pixel
 
         返回：
-            bead_positions: np.array, shape (6, 3)，单位 mm
+            (bead_positions, u0_estimated): bead_positions (6,3) mm, u0_estimated from sinusoidal fit
         """
         bead_positions = np.zeros((6, 3))
+        C_values = []
 
         for k in range(6):
             phi_list = []
@@ -126,18 +127,21 @@ class Calibration:
 
             phi_arr = np.array(phi_list)
             u_arr = np.array(u_list)
-            mean_v = np.mean(np.array(v_list))
+            v_arr = np.array(v_list)
 
             H = np.column_stack(
                 [np.ones(len(phi_arr)), np.cos(phi_arr), np.sin(phi_arr)]
             )
             C, A_cos, A_sin = np.linalg.lstsq(H, u_arr, rcond=None)[0]
 
+            C_values.append(C)
             bead_positions[k, 0] = A_cos * du * SOD / SDD
             bead_positions[k, 1] = A_sin * du * SOD / SDD
+            mean_v = np.mean(v_arr)
             bead_positions[k, 2] = (v0 - mean_v) * du * SOD / SDD
 
-        return bead_positions
+        u0_estimated = np.mean(C_values)
+        return bead_positions, u0_estimated
 
     def calculate(self, observations=None):
         """
@@ -253,48 +257,73 @@ def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv):
     return (u_proj, v_proj)
 
 
-def compute_reprojection_error(
-    eta, observations, SOD, SDD, u0, v0, du, dv, bead_positions
-):
+def joint_optimize(observations, SOD, SDD, u0_data, v0, du, dv, init_positions):
     """
-    计算给定 eta 下的重投影误差 RMS。
-    """
-    errors = []
-    for phi, bead_idx, u_meas, v_meas in observations:
-        P = bead_positions[bead_idx]
-        proj = reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv)
-        if proj is not None:
-            u_proj, v_proj = proj
-            err = np.sqrt((u_proj - u_meas) ** 2 + (v_proj - v_meas) ** 2)
-            errors.append(err)
+    联合优化 eta 和珠子 3D 位置。
 
-    if len(errors) == 0:
-        return 1e10
-
-    return np.sqrt(np.mean(np.array(errors) ** 2))
-
-
-def optimize_eta(observations, SOD, SDD, u0, v0, du, dv, bead_positions):
-    """
-    优化 eta 参数。
+    参数:
+        observations: [(phi, bead_idx, u, v), ...]
+        SOD, SDD, u0_data, v0, du, dv: 几何参数
+        init_positions: shape (6, 3), 初始珠子位置
 
     返回:
-        (eta_opt, rms_opt, rms_at_zero)
+        (best_eta, refined_positions, final_rms)
     """
-    rms_at_zero = compute_reprojection_error(
-        0.0, observations, SOD, SDD, u0, v0, du, dv, bead_positions
+    n_beads = 6
+    n_params = 1 + n_beads * 3  # eta + 6 beads * (x,y,z)
+
+    # 初始参数向量: [eta, x0,y0,z0, x1,y1,z1, ..., x5,y5,z5]
+    x0 = np.zeros(n_params)
+    x0[0] = 0.0  # eta = 0
+    for k in range(n_beads):
+        x0[1 + k * 3 : 1 + (k + 1) * 3] = init_positions[k]
+
+    # 参数边界: eta in [-0.1, 0.1], 珠子位置在初始值 ±50mm
+    lb = np.zeros(n_params)
+    ub = np.zeros(n_params)
+    lb[0] = -0.1
+    ub[0] = 0.1
+    for k in range(n_beads):
+        base = 1 + k * 3
+        for i in range(3):
+            lb[base + i] = init_positions[k, i] - 50.0
+            ub[base + i] = init_positions[k, i] + 50.0
+
+    def residuals(params):
+        eta = params[0]
+        res = []
+        for phi, bead_idx, u_meas, v_meas in observations:
+            bead_params = params[1 + bead_idx * 3 : 1 + (bead_idx + 1) * 3]
+            P = np.array(bead_params)
+            proj = reproject(P, phi, SOD, SDD, u0_data, v0, eta, du, dv)
+            if proj is not None:
+                res.append(proj[0] - u_meas)
+                res.append(proj[1] - v_meas)
+            else:
+                res.append(0.0)
+                res.append(0.0)
+        return np.array(res)
+
+    result = least_squares(
+        residuals, x0, method="trf", bounds=(lb, ub), loss="soft_l1", f_scale=2.0
     )
 
-    def objective(eta):
-        return compute_reprojection_error(
-            eta, observations, SOD, SDD, u0, v0, du, dv, bead_positions
-        )
+    best_eta = result.x[0]
+    refined_positions = np.zeros((6, 3))
+    for k in range(6):
+        refined_positions[k] = result.x[1 + k * 3 : 1 + (k + 1) * 3]
 
-    result = minimize_scalar(objective, bounds=(-0.05, 0.05), method="bounded")
-    eta_opt = result.x
-    rms_opt = result.fun
+    # 计算最终 RMS
+    errors = residuals(result.x)
+    final_rms = np.sqrt(np.mean(errors**2))
 
-    return eta_opt, rms_opt, rms_at_zero
+    # 计算 eta=0 时的 RMS
+    x0_only_beads = x0.copy()
+    x0_only_beads[0] = 0.0
+    errors_at_zero = residuals(x0_only_beads)
+    rms_at_zero = np.sqrt(np.mean(errors_at_zero**2))
+
+    return best_eta, refined_positions, final_rms, rms_at_zero
 
 
 if __name__ == "__main__":
@@ -320,19 +349,27 @@ if __name__ == "__main__":
     print(f"Using config: SOD={SOD}, SDD={SDD}, u0={u0}, v0={v0}")
 
     print("\n=== Estimating bead 3D positions ===")
-    bead_positions = c.estimate_bead_positions(observations, SOD, SDD, u0, v0, du)
+    bead_positions, u0_est = c.estimate_bead_positions(
+        observations, SOD, SDD, u0, v0, du
+    )
+    print(f"u0 from config: {u0}, u0 from data: {u0_est:.2f}")
     print("Estimated bead positions (mm):")
     for k in range(6):
         print(
             f"  bead {k}: x={bead_positions[k, 0]:.2f}, y={bead_positions[k, 1]:.2f}, z={bead_positions[k, 2]:.2f}"
         )
 
-    print("\n=== Optimizing eta ===")
-    eta_opt, rms_opt, rms_at_zero = optimize_eta(
-        observations, SOD, SDD, u0, v0, du, dv, bead_positions
+    print("\n=== Joint optimization: eta + bead positions ===")
+    best_eta, refined_positions, final_rms, rms_at_zero = joint_optimize(
+        observations, SOD, SDD, u0_est, v0, du, dv, bead_positions
     )
     print(f"eta=0 RMS: {rms_at_zero:.4f} pixels")
-    print(f"optimal eta: {eta_opt:.6f}")
-    print(f"optimal RMS: {rms_opt:.4f} pixels")
+    print(f"optimal eta: {best_eta:.6f}")
+    print(f"optimal RMS: {final_rms:.4f} pixels")
     if rms_at_zero > 0:
-        print(f"improvement: {(rms_at_zero - rms_opt) / rms_at_zero * 100:.2f}%")
+        print(f"improvement: {(rms_at_zero - final_rms) / rms_at_zero * 100:.2f}%")
+    print("\nRefined bead positions (mm):")
+    for k in range(6):
+        print(
+            f"  bead {k}: x={refined_positions[k, 0]:.2f}, y={refined_positions[k, 1]:.2f}, z={refined_positions[k, 2]:.2f}"
+        )
