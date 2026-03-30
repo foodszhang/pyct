@@ -143,6 +143,46 @@ class Calibration:
         u0_estimated = np.mean(C_values)
         return bead_positions, u0_estimated
 
+    def estimate_v0(self, observations, bead_positions, SOD, SDD, v0_initial, du):
+        """
+        从 v 观测数据中精确估计 v0（探测器光轴交点的 v 坐标）。
+
+        方法：珠子的 z 坐标与 mean_v 呈线性关系：
+            mean_v_k = v0_true - z_k * SDD / (SOD * du)
+        做线性回归：mean_v = slope * z + intercept
+        intercept 就是 v0_true（z=0 时的 v 坐标）。
+
+        参数：
+            observations: [(phi, bead_idx, u, v), ...]
+            bead_positions: (6, 3) 珠子位置（z 列已由 estimate_bead_positions 估算）
+            SOD, SDD, du: 几何参数
+            v0_initial: 估算 bead_positions 时使用的 v0（用于第一次迭代）
+
+        返回：
+            (v0_data, slope): v0_data 是线性拟合截距，slope 是斜率（用于验证）
+        """
+        mean_v_list = []
+        z_list = []
+
+        for k in range(6):
+            v_values = []
+            for phi, bead_idx, u, v in observations:
+                if bead_idx == k:
+                    v_values.append(v)
+            if len(v_values) > 0:
+                mean_v_list.append(np.mean(v_values))
+                z_list.append(bead_positions[k, 2])
+
+        mean_v_arr = np.array(mean_v_list)
+        z_arr = np.array(z_list)
+
+        H = np.column_stack([np.ones(len(z_arr)), z_arr])
+        intercept, slope = np.linalg.lstsq(H, mean_v_arr, rcond=None)[0]
+
+        theoretical_slope = -SDD / (SOD * du)
+
+        return intercept, slope, theoretical_slope
+
     def calculate(self, observations=None):
         """
         原有校准逻辑，返回 SOD, SDD, u0, v0, theta。
@@ -359,9 +399,20 @@ if __name__ == "__main__":
             f"  bead {k}: x={bead_positions[k, 0]:.2f}, y={bead_positions[k, 1]:.2f}, z={bead_positions[k, 2]:.2f}"
         )
 
+    print("\n=== Estimating v0 from v observations ===")
+    v0_data, slope, slope_theory = c.estimate_v0(
+        observations, bead_positions, SOD, SDD, v0, du
+    )
+    print(f"v0 from config: {v0}")
+    print(f"v0 from calculate(): {v0_cal}")
+    print(f"v0 from data (linear fit): {v0_data:.2f}")
+    print(f"slope from data: {slope:.4f}")
+    print(f"theoretical slope (-SDD/(SOD*du)): {slope_theory:.4f}")
+    print(f"slope error: {(slope - slope_theory) / slope_theory * 100:.2f}%")
+
     print("\n=== Joint optimization: eta + bead positions ===")
     best_eta, refined_positions, final_rms, rms_at_zero = joint_optimize(
-        observations, SOD, SDD, u0_est, v0, du, dv, bead_positions
+        observations, SOD, SDD, u0_est, v0_data, du, dv, bead_positions
     )
     print(f"eta=0 RMS: {rms_at_zero:.4f} pixels")
     print(f"optimal eta: {best_eta:.6f}")
