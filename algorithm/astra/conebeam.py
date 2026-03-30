@@ -255,8 +255,8 @@ if __name__ == "__main__":
         voxel_size=0.25,
         number_of_img=360,
         proj_path=r"/home/foods/pro/data/20260327-jz-1/",
-        detectorX=751.77,
-        detectorY=1013.91,
+        detectorX=916.88,
+        detectorY=475.67,
         pixel_size_raw=0.0748,
         sx=0.5,
         sy=0.5,
@@ -264,12 +264,14 @@ if __name__ == "__main__":
         rescale_slope=1.0,
         rescale_intercept=0.0,
     )
+    cb.eta = 0.000062
     cb.load_img()
     rec = cb.reconstruct()
     print(rec.shape, rec.dtype)
 
-    # Save volume
-    nii_path = os.path.join(output_dir, "phaseB_rec.nii.gz")
+    output_dir = "/home/foods/pro/pyct_old/pyct/recon_output/phaseC/"
+    os.makedirs(output_dir, exist_ok=True)
+    nii_path = os.path.join(output_dir, "phaseC_rec.nii.gz")
     nii_img = nib.Nifti1Image(rec, np.eye(4))
     nib.save(nii_img, nii_path)
     print(f"Saved {nii_path}")
