@@ -16,11 +16,21 @@ from qt_gui.snap_window import SnapWindow, SnapType
 from qt_gui.scan_window import ScanWindow
 from serial_controller import UltraBrightController
 from algorithm.calibration import cal
+from utils.paths import get_config_path, get_ui_path
 
 loader = QUiLoader()
-Config = yaml.load(open("config.yaml"), Loader=yaml.FullLoader)
+Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 
-xray_status_code = ['待预热', '预热中', '待开启', 'X射线开启', 'X射线过载', 'X射线无法开启', '自检中']
+xray_status_code = [
+    "待预热",
+    "预热中",
+    "待开启",
+    "X射线开启",
+    "X射线过载",
+    "X射线无法开启",
+    "自检中",
+]
+
 
 class MainWindow(QtWidgets.QMainWindow):
     CalImageChanged = QtCore.Signal(np.ndarray)
@@ -29,15 +39,13 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         loader.registerCustomWidget(rec.CTSliceView)
         loader.registerCustomWidget(pg.GraphicsView)
-        self.ui = loader.load("qt_gui/main.ui", None)
+        self.ui = loader.load(get_ui_path("main.ui"), None)
         # 选择项目目录
-
 
         self.project_path = None
         self.project_selector_window = ProjectSelectorWindow(parent=self)
         if self.project_path is None:
             self.open_project_selector()
-
 
         # tab配置
         self.tab_widget = self.ui.findChild(QtWidgets.QTabWidget, "tabWidget")
@@ -101,7 +109,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.xray_warm_button.clicked.connect(self.xray_warm)
         self.xray_off_button.clicked.connect(self.xray_off)
         self.xray_reconnect_button.clicked.connect(self.xray_reconnect)
-        self.xray_status = '准备中'
+        self.xray_status = "准备中"
         self.xray_voltage = 0
         self.xray_current = 0
 
@@ -123,15 +131,17 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "警告", "未配置X射线控制器")
             sys.exit(1)
         try:
-            self.xray_controller = UltraBrightController(config["port"], config["baudrate"])
+            self.xray_controller = UltraBrightController(
+                config["port"], config["baudrate"]
+            )
+            self.hardware_available = True
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "警告", "X射线控制器连接失败")
+            print("[Warn] 硬件不可用，已进入离线模式（可校准/重建，不能扫描）")
             self.xray_controller = None
+            self.hardware_available = False
             for w in self.xray_wdigets:
                 w.setEnabled(False)
             self.xray_reconnect_button.setEnabled(True)
-            
-
 
         # tab2 重建配置
         self.start_reconstruction_button = self.ui.findChild(
@@ -146,21 +156,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ct_slice_view_list.append(self.ui.findChild(rec.CTSliceView, "sliceView0"))
         self.ct_slice_view_list.append(self.ui.findChild(rec.CTSliceView, "sliceView1"))
         self.ct_slice_view_list.append(self.ui.findChild(rec.CTSliceView, "sliceView2"))
-        self.recon_window_high_spin_box = self.ui.findChild(QtWidgets.QDoubleSpinBox, "reconWindowHighSpinBox")
-        self.recon_window_low_spin_box = self.ui.findChild(QtWidgets.QDoubleSpinBox, "reconWindowLowSpinBox")
-        #self.recon_window_high_slider = self.ui.findChild(QtWidgets.QSlider, "reconWindowHighSlider")
-        #self.recon_window_low_slider = self.ui.findChild(QtWidgets.QSlider, "reconWindowLowSlider")
-        self.recon_window_change_button = self.ui.findChild(QtWidgets.QPushButton, "reconWindowChangeButton")
+        self.recon_window_high_spin_box = self.ui.findChild(
+            QtWidgets.QDoubleSpinBox, "reconWindowHighSpinBox"
+        )
+        self.recon_window_low_spin_box = self.ui.findChild(
+            QtWidgets.QDoubleSpinBox, "reconWindowLowSpinBox"
+        )
+        # self.recon_window_high_slider = self.ui.findChild(QtWidgets.QSlider, "reconWindowHighSlider")
+        # self.recon_window_low_slider = self.ui.findChild(QtWidgets.QSlider, "reconWindowLowSlider")
+        self.recon_window_change_button = self.ui.findChild(
+            QtWidgets.QPushButton, "reconWindowChangeButton"
+        )
         self.recon_window_high_spin_box.valueChanged.connect(self.set_window_high)
         self.recon_window_low_spin_box.valueChanged.connect(self.set_window_low)
-        #self.recon_window_high_slider.valueChanged.connect(self.set_slider_window_high)
-        #self.recon_window_low_slider.valueChanged.connect(self.set_slider_window_low)
+        # self.recon_window_high_slider.valueChanged.connect(self.set_slider_window_high)
+        # self.recon_window_low_slider.valueChanged.connect(self.set_slider_window_low)
         self.recon_window_change_button.clicked.connect(self.change_recon_window)
         self.recon_max_value = 255
         self.recon_min_value = 0
 
-
-        #tab3 校准配置
+        # tab3 校准配置
         self.calButton = self.ui.findChild(QtWidgets.QPushButton, "calButton")
         self.saveCalButton = self.ui.findChild(QtWidgets.QPushButton, "saveCalButton")
         self.cal_detector_x_line_edit = self.ui.findChild(
@@ -182,7 +197,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calButton.clicked.connect(self.calibrate)
         self.saveCalButton.clicked.connect(self.save_calibrate_result)
 
-    
     def change_recon_window(self):
         for v in self.ct_slice_view_list:
             v.change_window()
@@ -190,30 +204,38 @@ class MainWindow(QtWidgets.QMainWindow):
     def set_slider_window_high(self, value):
         max_value = self.recon_max_value
         min_value = self.recon_min_value
-        self.recon_window_high_spin_box.setValue(value * (max_value - min_value) / 255 + min_value)
-        #self.recon_window_high_spin_box.setValue(value)
+        self.recon_window_high_spin_box.setValue(
+            value * (max_value - min_value) / 255 + min_value
+        )
+        # self.recon_window_high_spin_box.setValue(value)
         for v in self.ct_slice_view_list:
             v.set_window_high(value)
 
     def set_slider_window_low(self, value):
         max_value = self.recon_max_value
         min_value = self.recon_min_value
-        self.recon_window_low_spin_box.setValue(value * (max_value - min_value) / 255 + min_value)
-        #self.recon_window_low_spin_box.setValue(value)
+        self.recon_window_low_spin_box.setValue(
+            value * (max_value - min_value) / 255 + min_value
+        )
+        # self.recon_window_low_spin_box.setValue(value)
         for v in self.ct_slice_view_list:
             v.set_window_high(value)
 
     def set_window_high(self, value):
         max_value = self.recon_max_value
         min_value = self.recon_min_value
-        self.recon_window_high_slider.setValue(int((value-min_value) * 255 / (max_value - min_value)))
+        self.recon_window_high_slider.setValue(
+            int((value - min_value) * 255 / (max_value - min_value))
+        )
         for v in self.ct_slice_view_list:
             v.set_window_high(value)
 
     def set_window_low(self, value):
         max_value = self.recon_max_value
         min_value = self.recon_min_value
-        self.recon_window_low_slider.setValue(int((value-min_value) * 255 / (max_value - min_value)))
+        self.recon_window_low_slider.setValue(
+            int((value - min_value) * 255 / (max_value - min_value))
+        )
         for v in self.ct_slice_view_list:
             v.set_window_low(value)
 
@@ -221,15 +243,16 @@ class MainWindow(QtWidgets.QMainWindow):
         config = Config.get("BrightController", None)
         if not config:
             QtWidgets.QMessageBox.critical(self, "警告", "未配置X射线控制器")
-            sys.exit(1) 
+            sys.exit(1)
         try:
-            self.xray_controller = UltraBrightController(config["port"], config["baudrate"])
+            self.xray_controller = UltraBrightController(
+                config["port"], config["baudrate"]
+            )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "警告", "X射线控制器连接失败")
             self.xray_controller = None
         if not self.xray_refresh_timer.isActive():
             self.xray_refresh_timer.start()
-
 
     def xray_warm(self):
         ret = self.xray_controller.set_voltage(int(self.voltage_line_edit.text()))
@@ -248,11 +271,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.xray_in_control = True
         for w in self.xray_wdigets:
             w.setEnabled(False)
-        if self.xray_status != '待开启':
+        if self.xray_status != "待开启":
             self.scan_button.setEnabled(False)
             self.dark_snap_button.setEnabled(False)
             self.empty_snap_button.setEnabled(False)
-
 
     def xray_off(self):
         self.xray_controller.xray_off()
@@ -279,8 +301,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.xray_refresh_timer.stop()
             self.xray_controller.ser.close()
             self.xray_controller = None
-            return 
-        
+            return
+
         status, voltage, current = status
         self.voltage_number.display(voltage)
         self.current_number.display(current)
@@ -289,7 +311,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.xray_status_label.setStyleSheet("color: green")
         self.xray_voltage = float(voltage)
         self.xray_current = float(current)
-        if self.xray_status == '待预热' or self.xray_status=="待开启":
+        if self.xray_status == "待预热" or self.xray_status == "待开启":
             for w in self.xray_wdigets:
                 w.setEnabled(True)
         if self.xray_status == "待开启":
@@ -298,11 +320,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.empty_snap_button.setEnabled(True)
             self.xray_warm_button.setEnabled(False)
 
-
     def calibrate_thread(self):
         config = Config.get("CalibrationParam", None)
         if not config:
-            QtWidgets.QMessageBox.critical(self, "警告", "配置文件错误， 请检查config.yaml文件")
+            QtWidgets.QMessageBox.critical(
+                self, "警告", "配置文件错误， 请检查config.yaml文件"
+            )
+            return
         c = cal.Calibration(
             self.project_path,
             float(config["detectorPixelSize"]),
@@ -310,15 +334,13 @@ class MainWindow(QtWidgets.QMainWindow):
             int(config["detectorWidth"]),
             int(config["detectorHeight"]),
         )
-        # return SOD, SDD, u0, v0, theta
+        self.cal_result = c.calculate_vshift_package()
 
-        self.cal_result = c.calculate()
-
-        self.cal_sod_line_edit.setText(str(self.cal_result[0]))
-        self.cal_sdd_line_edit.setText(str(self.cal_result[1]))
-        self.cal_detector_x_line_edit.setText(str(self.cal_result[2]))
-        self.cal_detector_y_line_edit.setText(str(self.cal_result[3]))
-        self.cal_rotation_line_edit.setText(str(self.cal_result[4]))
+        self.cal_sod_line_edit.setText(str(self.cal_result["SOD"]))
+        self.cal_sdd_line_edit.setText(str(self.cal_result["SDD"]))
+        self.cal_detector_x_line_edit.setText(str(self.cal_result["u0_raw"]))
+        self.cal_detector_y_line_edit.setText(str(self.cal_result["v0_raw"]))
+        self.cal_rotation_line_edit.setText("0")
         self.tab_widget.setEnabled(True)
 
     def calibrate(self):
@@ -327,11 +349,31 @@ class MainWindow(QtWidgets.QMainWindow):
         cal_thread.start()
 
     def save_calibrate_result(self):
-        self.reconstruction_dialog.sod_line_edit.setText(str(self.cal_result[0]))
-        self.reconstruction_dialog.sdd_line_edit.setText(str(self.cal_result[1]))
-        self.reconstruction_dialog.detector_x_line_edit.setText(str(self.cal_result[2]))
-        self.reconstruction_dialog.detector_y_line_edit.setText(str(self.cal_result[3]))
-        self.reconstruction_dialog.rotation_line_edit.setText(str(self.cal_result[4]))
+        cr = self.cal_result
+        self.reconstruction_dialog.sod_line_edit.setText(str(cr["SOD"]))
+        self.reconstruction_dialog.sdd_line_edit.setText(str(cr["SDD"]))
+        self.reconstruction_dialog.detector_x_line_edit.setText(str(cr["u0_raw"]))
+        self.reconstruction_dialog.detector_y_line_edit.setText(str(cr["v0_raw"]))
+        self.reconstruction_dialog.rotation_line_edit.setText("0")
+
+        calib_for_yaml = {
+            "SOD": cr["SOD"],
+            "SDD": cr["SDD"],
+            "u0_raw": cr["u0_raw"],
+            "v0_raw": cr["v0_raw"],
+            "eta": cr["eta"],
+            "vc_raw": cr["vc_raw"],
+            "vs_raw": cr["vs_raw"],
+            "sx": cr["sx"],
+            "sy": cr["sy"],
+            "u0_recon": cr["u0_recon"],
+            "v0_recon": cr["v0_recon"],
+            "vc_recon": cr["vc_recon"],
+            "vs_recon": cr["vs_recon"],
+        }
+        Config["CalibResult"] = calib_for_yaml
+        yaml.dump(Config, open(get_config_path(), "w"), Dumper=yaml.Dumper)
+
         self.reconstruction_dialog.save_config()
 
     def update_progress_bar(self, value, text):
@@ -348,21 +390,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.recon_window_high_spin_box.setMinimum(min_value)
         self.recon_window_low_spin_box.setMaximum(max_value)
         self.recon_window_low_spin_box.setMinimum(min_value)
-        #self.recon_window_high_slider.setMaximum(255)
-        #self.recon_window_high_slider.setMinimum(0)
-        #self.recon_window_low_slider.setMaximum(255)
-        #self.recon_window_low_slider.setMinimum(0)
+        # self.recon_window_high_slider.setMaximum(255)
+        # self.recon_window_high_slider.setMinimum(0)
+        # self.recon_window_low_slider.setMaximum(255)
+        # self.recon_window_low_slider.setMinimum(0)
 
         self.recon_window_high_spin_box.setValue(max_value)
         self.recon_window_low_spin_box.setValue(min_value)
-        #self.recon_window_high_slider.setValue(255)
-        #self.recon_window_low_slider.setValue(0)
+        # self.recon_window_high_slider.setValue(255)
+        # self.recon_window_low_slider.setValue(0)
         if self.reconstruction_dialog.use_ct_hu.isChecked():
             self.recon_window_high_spin_box.setValue(3000)
             self.recon_window_low_spin_box.setValue(-1000)
-            #self.recon_window_high_slider.setValue((3000-min_value) /(max_value-min_value) * 255)
-            #self.recon_window_low_slider.setValue((0-min_value) /(max_value-min_value) * 255)
-                                                
+            # self.recon_window_high_slider.setValue((3000-min_value) /(max_value-min_value) * 255)
+            # self.recon_window_low_slider.setValue((0-min_value) /(max_value-min_value) * 255)
+
         for i in range(3):
             if self.reconstruction_dialog.use_ct_hu.isChecked():
                 self.ct_slice_view_list[i].min_window = -1000
@@ -399,7 +441,7 @@ class ProjectSelectorWindow(QtWidgets.QDialog):
         super().__init__()
         self.parent_window = parent
         loader = QUiLoader()
-        self.ui = loader.load("qt_gui/projectSelector.ui", None)
+        self.ui = loader.load(get_ui_path("projectSelector.ui"), None)
         self.choose_project_button = self.ui.findChild(
             QtWidgets.QPushButton, "chooseProjectpushButton"
         )

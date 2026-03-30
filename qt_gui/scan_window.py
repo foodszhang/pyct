@@ -14,9 +14,10 @@ from concurrent.futures import ThreadPoolExecutor
 import yaml
 from serial_controller import ZolixMcController
 import time
+from utils.paths import get_config_path, get_ui_path
 
 loader = QUiLoader()
-Config = yaml.load(open("config.yaml"), Loader=yaml.FullLoader)
+Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 
 
 class ScanWindow(QtWidgets.QDialog):
@@ -26,7 +27,7 @@ class ScanWindow(QtWidgets.QDialog):
     def __init__(self, parent_window, parent=None):
         super().__init__()
         self.parent_window = parent_window
-        self.ui = loader.load("qt_gui/scan.ui", None)
+        self.ui = loader.load(get_ui_path("scan.ui"), None)
         self.button_box = self.ui.findChild(QtWidgets.QDialogButtonBox, "buttonBox")
         self.button_box.accepted.connect(self.button_start)
         self.number_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "numberLineEdit")

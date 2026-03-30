@@ -28,3 +28,17 @@ ZolixMcController:
   baudrate: 19200
   port: COM4
   timeout: 400
+CalibResult:
+  SOD: 908.8
+  SDD: 959.6
+  u0_raw: 916.88
+  v0_raw: 1013.91
+  eta: 0.0
+  vc_raw: -11.381
+  vs_raw: -14.868
+  sx: 0.5
+  sy: 0.5
+  u0_recon: 458.44
+  v0_recon: 506.96
+  vc_recon: -5.691
+  vs_recon: -7.434

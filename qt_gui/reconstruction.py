@@ -13,16 +13,17 @@ from typing import Optional
 import yaml
 import numba as nb
 import nibabel as nib
+from utils.paths import get_config_path, get_ui_path
 
 loader = QUiLoader()
-Config = yaml.load(open("config.yaml"), Loader=yaml.FullLoader)
+Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 
 
 class CTSliceView(QtWidgets.QWidget):
     def __init__(self, parent=None, window_sliders=None):
         super().__init__(parent)
         loader.registerCustomWidget(pg.GraphicsView)
-        self.ui = loader.load("qt_gui/ctSlice.ui", self)
+        self.ui = loader.load(get_ui_path("ctSlice.ui"), self)
         self.gv = self.ui.findChild(pg.GraphicsView, "ImageView")
         self.slider = self.ui.findChild(QtWidgets.QSlider, "SliceSlider")
         self.slider.valueChanged.connect(self.slider_value_changed)
@@ -94,7 +95,7 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         super().__init__(parent)
         loader = QUiLoader()
         self.parent_window = parent_window
-        self.ui = loader.load("qt_gui/reconstruction.ui", self)
+        self.ui = loader.load(get_ui_path("reconstruction.ui"), self)
         self.angle_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "angleLineEdit")
         self.column_count_line_edit = self.ui.findChild(
             QtWidgets.QLineEdit, "columnCountLineEdit"
@@ -181,7 +182,7 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         config["detectorY"] = self.detector_y_line_edit.text()
         config["rotation"] = self.rotation_line_edit.text()
         Config["ReconParam"] = config
-        yaml.dump(Config, open("config.yaml", "w"), Dumper=yaml.Dumper)
+        yaml.dump(Config, open(get_config_path(), "w"), Dumper=yaml.Dumper)
 
     def reconstruct_thread(self):
         NX = int(self.voxel_size_x_line_edit.text())
@@ -192,14 +193,19 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         dd_column = float(self.x_spacing_line_edit.text())
         dd_row = float(self.y_spacing_line_edit.text())
         voxel_size = float(self.voxel_pixel_size_line_edit.text())
-        number_of_img = float(self.angle_line_edit.text())
-        rotation_angle = float(self.rotation_line_edit.text())
-        number_of_img = int(360 // number_of_img)
         SOD = float(self.sod_line_edit.text())
         SDD = float(self.sdd_line_edit.text())
         proj_path = self.parent_window.project_path
         detector_x = float(self.detector_x_line_edit.text())
         detector_y = float(self.detector_y_line_edit.text())
+
+        calib = Config.get("CalibResult", {})
+        eta_val = float(calib.get("eta", 0.0))
+        vc_val = float(calib.get("vc_recon", 0.0))
+        vs_val = float(calib.get("vs_recon", 0.0))
+        sx_val = float(calib.get("sx", 0.5))
+        sy_val = float(calib.get("sy", 0.5))
+
         if self.use_scan_check_box.isChecked():
             cb = ConeBeam(
                 SOD=SOD,
@@ -216,8 +222,12 @@ class ReconstrcionDialog(QtWidgets.QDialog):
                 proj_path=proj_path,
                 detectorX=detector_x,
                 detectorY=detector_y,
-                rotation_angle=rotation_angle,
-                useHu=self.use_ct_hu.isChecked(),
+                eta=eta_val,
+                vc=vc_val,
+                vs=vs_val,
+                sx=sx_val,
+                sy=sy_val,
+                useHu=False,
                 rescale_slope=self.rescale_slope,
                 rescale_intercept=self.rescale_intercept,
             )
@@ -238,12 +248,16 @@ class ReconstrcionDialog(QtWidgets.QDialog):
                 proj_path=proj_path,
                 detectorX=detector_x,
                 detectorY=detector_y,
-                rotation_angle=rotation_angle,
-                useHu=self.use_ct_hu.isChecked(),
+                eta=eta_val,
+                vc=vc_val,
+                vs=vs_val,
+                sx=sx_val,
+                sy=sy_val,
+                useHu=False,
                 rescale_slope=self.rescale_slope,
                 rescale_intercept=self.rescale_intercept,
             )
-            cb.load_img()
+            cb.load_img(angle_from_filename=True)
         rec = cb.reconstruct()
         nii_img = nib.Nifti1Image(rec, np.eye(4))
         nib.save(nii_img, "rec4.nii.gz")

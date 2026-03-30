@@ -16,9 +16,10 @@ from serial_controller import ZolixMcController
 from enum import Enum
 from typing import Literal
 import time
+from utils.paths import get_config_path, get_ui_path
 
 loader = QUiLoader()
-Config = yaml.load(open("config.yaml"), Loader=yaml.FullLoader)
+Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 
 
 class SnapType(Enum):
@@ -34,7 +35,7 @@ class SnapWindow(QtWidgets.QDialog):
     def __init__(self, parent, type: Literal[SnapType.DARK, SnapType.EMPTY]):
         super().__init__()
         self.parent_window = parent
-        self.ui = loader.load("qt_gui/snap.ui", None)
+        self.ui = loader.load(get_ui_path("snap.ui"), None)
         self.button_box = self.ui.findChild(QtWidgets.QDialogButtonBox, "buttonBox")
         self.button_box.accepted.connect(self.button_start)
         self.file_name_line_edit = self.ui.findChild(
@@ -91,7 +92,9 @@ class SnapWindow(QtWidgets.QDialog):
         py34 = os.environ.get("py34", "")
         if not py34:
             QtWidgets.QMessageBox.critical(
-                self, "警告", "py34环境变量未配置!请检查系统环境变量, 保证py34环境变量指向3.4版本python.exe的路径"
+                self,
+                "警告",
+                "py34环境变量未配置!请检查系统环境变量, 保证py34环境变量指向3.4版本python.exe的路径",
             )
             return
 

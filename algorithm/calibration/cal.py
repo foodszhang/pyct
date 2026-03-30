@@ -266,6 +266,88 @@ class Calibration:
         SDD = SDD * self.dpixel
         return round(SOD, 2), round(SDD, 2), round(u0, 2), round(v0, 2), round(theta, 2)
 
+    def calculate_vshift_package(self):
+        """
+        两阶段校准，输出完整参数包（含 v-shift）。
+
+        Stage-1: 现有 calculate() 获得几何初值 + estimate_bead_positions 获得 u0_est
+        Stage-2: joint_optimize() 优化 eta/vc/vs
+
+        返回 dict:
+          SOD, SDD, u0_raw, v0_raw, eta, vc_raw, vs_raw,
+          rms_init, rms_final, sx, sy,
+          u0_recon, v0_recon, vc_recon, vs_recon,
+          notes
+        """
+        observations = self.load_img()
+
+        SOD_cal, SDD_cal, u0_cal, v0_cal, theta_cal = self.calculate(observations)
+
+        du = dv = self.dpixel
+        bead_positions, u0_est = self.estimate_bead_positions(
+            observations, SOD_cal, SDD_cal, u0_cal, v0_cal, du
+        )
+
+        (
+            best_eta,
+            best_SOD,
+            best_SDD,
+            best_vc,
+            best_vs,
+            refined_positions,
+            final_rms,
+            rms_init,
+        ) = joint_optimize(
+            observations, SOD_cal, SDD_cal, u0_est, v0_cal, du, dv, bead_positions
+        )
+
+        sx = 0.5
+        sy = 0.5
+        u0_raw = round(u0_cal, 2)
+        v0_raw = round(v0_cal, 2)
+        vc_raw = round(best_vc, 6)
+        vs_raw = round(best_vs, 6)
+        eta_raw = round(best_eta, 6)
+        SOD_raw = round(best_SOD, 2)
+        SDD_raw = round(best_SDD, 2)
+
+        u0_recon = round(u0_raw * sx, 2)
+        v0_recon = round(v0_raw * sy, 2)
+        vc_recon = round(vc_raw * sy, 6)
+        vs_recon = round(vs_raw * sy, 6)
+
+        print(
+            f"[CalibResult] SOD={SOD_raw}, SDD={SDD_raw}, "
+            f"u0_raw={u0_raw}, v0_raw={v0_raw}, "
+            f"eta={eta_raw}, vc_raw={vc_raw}, vs_raw={vs_raw}"
+        )
+        print(
+            f"[CalibResult] vc_recon={vc_recon}, vs_recon={vs_recon}, "
+            f"RMS init={rms_init:.4f} -> final={final_rms:.4f}"
+        )
+
+        return {
+            "SOD": SOD_raw,
+            "SDD": SDD_raw,
+            "u0_raw": u0_raw,
+            "v0_raw": v0_raw,
+            "eta": eta_raw,
+            "vc_raw": vc_raw,
+            "vs_raw": vs_raw,
+            "rms_init": round(rms_init, 4),
+            "rms_final": round(final_rms, 4),
+            "sx": sx,
+            "sy": sy,
+            "u0_recon": u0_recon,
+            "v0_recon": v0_recon,
+            "vc_recon": vc_recon,
+            "vs_recon": vs_recon,
+            "notes": {
+                "v_shift_sign_in_conebeam": "use -(vc*cos(phi)+vs*sin(phi))",
+                "angles": "phi comes from filename degrees (relative angle), deg->rad",
+            },
+        }
+
 
 def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv, vc=0.0, vs=0.0):
     """
@@ -403,28 +485,6 @@ def joint_optimize(
         best_SDD,
         best_vc,
         best_vs,
-        refined_positions,
-        final_rms,
-        rms_init,
-    )
-
-    best_eta = result.x[0]
-    best_SOD = result.x[1]
-    best_SDD = result.x[2]
-    best_theta = result.x[3]
-    refined_positions = np.zeros((6, 3))
-    for k in range(6):
-        refined_positions[k] = result.x[n_geom + k * 3 : n_geom + (k + 1) * 3]
-
-    errors = residuals(result.x)
-    final_rms = np.sqrt(np.mean(errors**2))
-    rms_init = np.sqrt(np.mean(residuals(x0) ** 2))
-
-    return (
-        best_eta,
-        best_SOD,
-        best_SDD,
-        best_theta,
         refined_positions,
         final_rms,
         rms_init,
