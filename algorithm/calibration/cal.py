@@ -267,14 +267,15 @@ class Calibration:
         return round(SOD, 2), round(SDD, 2), round(u0, 2), round(v0, 2), round(theta, 2)
 
 
-def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv):
+def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv, ax=0.0, ay=0.0):
     """
     将3D点P投影到探测器平面，返回像素坐标 (u_proj, v_proj)。
+    旋转轴经过 (ax, ay, 0) 点。
     """
     ODD = SDD - SOD
 
-    src = np.array([np.sin(phi) * SOD, -np.cos(phi) * SOD, 0.0])
-    det0 = np.array([-np.sin(phi) * ODD, np.cos(phi) * ODD, 0.0])
+    src = np.array([ax + np.sin(phi) * SOD, ay - np.cos(phi) * SOD, 0.0])
+    det0 = np.array([ax - np.sin(phi) * ODD, ay + np.cos(phi) * ODD, 0.0])
 
     u_dir = np.array([np.cos(phi), np.sin(phi), 0.0])
     v_dir = np.array([-eta * np.sin(phi), eta * np.cos(phi), -1.0])
@@ -297,45 +298,68 @@ def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv):
     return (u_proj, v_proj)
 
 
-def joint_optimize(observations, SOD, SDD, u0_data, v0, du, dv, init_positions):
+def joint_optimize(
+    observations, SOD_init, SDD_init, u0_fixed, v0_fixed, du, dv, init_positions
+):
     """
-    联合优化 eta 和珠子 3D 位置。
+    联合优化 eta, SOD, SDD, ax, ay 和珠子 3D 位置。v0 固定。
+
+    参数向量: [eta, SOD, SDD, ax, ay, x0,y0,z0, x1,y1,z1, ..., x5,y5,z5]
+    共 5 + 18 = 23 个参数
 
     参数:
         observations: [(phi, bead_idx, u, v), ...]
-        SOD, SDD, u0_data, v0, du, dv: 几何参数
+        SOD_init, SDD_init: 几何参数初始值
+        u0_fixed: u0 固定值（不优化）
+        v0_fixed: v0 固定值（不优化）
+        du, dv: 像素间距
         init_positions: shape (6, 3), 初始珠子位置
 
     返回:
-        (best_eta, refined_positions, final_rms)
+        (best_eta, best_SOD, best_SDD, best_ax, best_ay, refined_positions, final_rms, rms_init)
     """
     n_beads = 6
-    n_params = 1 + n_beads * 3  # eta + 6 beads * (x,y,z)
+    n_geom = 5  # eta, SOD, SDD, ax, ay
+    n_params = n_geom + n_beads * 3
 
-    # 初始参数向量: [eta, x0,y0,z0, x1,y1,z1, ..., x5,y5,z5]
     x0 = np.zeros(n_params)
-    x0[0] = 0.0  # eta = 0
+    x0[0] = 0.0  # eta
+    x0[1] = SOD_init  # SOD
+    x0[2] = SDD_init  # SDD
+    x0[3] = 0.0  # ax
+    x0[4] = 0.0  # ay
     for k in range(n_beads):
-        x0[1 + k * 3 : 1 + (k + 1) * 3] = init_positions[k]
+        x0[n_geom + k * 3 : n_geom + (k + 1) * 3] = init_positions[k]
 
-    # 参数边界: eta in [-0.1, 0.1], 珠子位置在初始值 ±50mm
     lb = np.zeros(n_params)
     ub = np.zeros(n_params)
     lb[0] = -0.1
     ub[0] = 0.1
+    lb[1] = 880.0
+    ub[1] = 940.0
+    lb[2] = 700.0
+    ub[2] = 1200.0
+    lb[3] = -5.0
+    ub[3] = 5.0
+    lb[4] = -5.0
+    ub[4] = 5.0
     for k in range(n_beads):
-        base = 1 + k * 3
+        base = n_geom + k * 3
         for i in range(3):
             lb[base + i] = init_positions[k, i] - 50.0
             ub[base + i] = init_positions[k, i] + 50.0
 
     def residuals(params):
         eta = params[0]
+        SOD = params[1]
+        SDD = params[2]
+        ax = params[3]
+        ay = params[4]
         res = []
         for phi, bead_idx, u_meas, v_meas in observations:
-            bead_params = params[1 + bead_idx * 3 : 1 + (bead_idx + 1) * 3]
+            bead_params = params[n_geom + bead_idx * 3 : n_geom + (bead_idx + 1) * 3]
             P = np.array(bead_params)
-            proj = reproject(P, phi, SOD, SDD, u0_data, v0, eta, du, dv)
+            proj = reproject(P, phi, SOD, SDD, u0_fixed, v0_fixed, eta, du, dv, ax, ay)
             if proj is not None:
                 res.append(proj[0] - u_meas)
                 res.append(proj[1] - v_meas)
@@ -349,21 +373,28 @@ def joint_optimize(observations, SOD, SDD, u0_data, v0, du, dv, init_positions):
     )
 
     best_eta = result.x[0]
+    best_SOD = result.x[1]
+    best_SDD = result.x[2]
+    best_ax = result.x[3]
+    best_ay = result.x[4]
     refined_positions = np.zeros((6, 3))
     for k in range(6):
-        refined_positions[k] = result.x[1 + k * 3 : 1 + (k + 1) * 3]
+        refined_positions[k] = result.x[n_geom + k * 3 : n_geom + (k + 1) * 3]
 
-    # 计算最终 RMS
     errors = residuals(result.x)
     final_rms = np.sqrt(np.mean(errors**2))
+    rms_init = np.sqrt(np.mean(residuals(x0) ** 2))
 
-    # 计算 eta=0 时的 RMS
-    x0_only_beads = x0.copy()
-    x0_only_beads[0] = 0.0
-    errors_at_zero = residuals(x0_only_beads)
-    rms_at_zero = np.sqrt(np.mean(errors_at_zero**2))
-
-    return best_eta, refined_positions, final_rms, rms_at_zero
+    return (
+        best_eta,
+        best_SOD,
+        best_SDD,
+        best_ax,
+        best_ay,
+        refined_positions,
+        final_rms,
+        rms_init,
+    )
 
 
 if __name__ == "__main__":
@@ -410,17 +441,270 @@ if __name__ == "__main__":
     print(f"theoretical slope (-SDD/(SOD*du)): {slope_theory:.4f}")
     print(f"slope error: {(slope - slope_theory) / slope_theory * 100:.2f}%")
 
-    print("\n=== Joint optimization: eta + bead positions ===")
-    best_eta, refined_positions, final_rms, rms_at_zero = joint_optimize(
-        observations, SOD, SDD, u0_est, v0_data, du, dv, bead_positions
+    print("\n=== Joint optimization: eta + SOD + SDD + bead positions ===")
+    (
+        best_eta,
+        best_SOD,
+        best_SDD,
+        best_ax,
+        best_ay,
+        refined_positions,
+        final_rms,
+        rms_init,
+    ) = joint_optimize(observations, SOD, SDD, u0_est, v0, du, dv, bead_positions)
+    print(f"\n--- Parameter comparison ---")
+    print(f"eta:   init=0.000000  ->  opt={best_eta:.6f}")
+    print(
+        f"SOD:   init={SOD:.2f}  ->  opt={best_SOD:.2f}  (delta={best_SOD - SOD:.2f})"
     )
-    print(f"eta=0 RMS: {rms_at_zero:.4f} pixels")
-    print(f"optimal eta: {best_eta:.6f}")
-    print(f"optimal RMS: {final_rms:.4f} pixels")
-    if rms_at_zero > 0:
-        print(f"improvement: {(rms_at_zero - final_rms) / rms_at_zero * 100:.2f}%")
-    print("\nRefined bead positions (mm):")
+    print(
+        f"SDD:   init={SDD:.2f}  ->  opt={best_SDD:.2f}  (delta={best_SDD - SDD:.2f})"
+    )
+    print(f"ax:    init=0.000000  ->  opt={best_ax:.6f}")
+    print(f"ay:    init=0.000000  ->  opt={best_ay:.6f}")
+    print(f"v0:    fixed at {v0} (not optimized)")
+    print(f"u0:    fixed at {u0_est:.2f} (not optimized)")
+    print(
+        f"\nRMS: init={rms_init:.4f}  ->  opt={final_rms:.4f}  (improvement={(rms_init - final_rms) / rms_init * 100:.2f}%)"
+    )
+    print(f"\nRefined bead positions (mm):")
     for k in range(6):
         print(
             f"  bead {k}: x={refined_positions[k, 0]:.2f}, y={refined_positions[k, 1]:.2f}, z={refined_positions[k, 2]:.2f}"
         )
+    print(f"\nPer-bead RMS:")
+    for k in range(6):
+        bead_obs = [(phi, b, u, v) for phi, b, u, v in observations if b == k]
+        errors = []
+        for phi, _, u_meas, v_meas in bead_obs:
+            P = refined_positions[k]
+            proj = reproject(
+                P,
+                phi,
+                best_SOD,
+                best_SDD,
+                u0_est,
+                v0,
+                best_eta,
+                du,
+                dv,
+                best_ax,
+                best_ay,
+            )
+            if proj is not None:
+                errors.append(
+                    np.sqrt((proj[0] - u_meas) ** 2 + (proj[1] - v_meas) ** 2)
+                )
+        if errors:
+            print(f"  bead {k}: rms={np.sqrt(np.mean(np.array(errors) ** 2)):.3f} px")
+    print(
+        f"\nOptimized params: SOD={best_SOD:.2f}, SDD={best_SDD:.2f}, u0={u0_est:.2f}, v0={v0:.2f}, eta={best_eta:.6f}, ax={best_ax:.6f}, ay={best_ay:.6f}"
+    )
+
+    print("\n=== Residual diagnostics ===")
+    import os
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    diag_dir = "/home/foods/pro/data/20260327-jz-1/diagnostics/"
+    os.makedirs(diag_dir, exist_ok=True)
+
+    all_u_res = []
+    all_v_res = []
+
+    for k in range(6):
+        bead_obs = [(phi, b, u, v) for phi, b, u, v in observations if b == k]
+        if len(bead_obs) == 0:
+            continue
+
+        rows = []
+        u_res_list = []
+        v_res_list = []
+        total_err_list = []
+
+        for phi, _, u_meas, v_meas in bead_obs:
+            P = refined_positions[k]
+            proj = reproject(
+                P,
+                phi,
+                best_SOD,
+                best_SDD,
+                u0_est,
+                v0,
+                best_eta,
+                du,
+                dv,
+                best_ax,
+                best_ay,
+            )
+            if proj is not None:
+                u_proj, v_proj = proj
+                u_res = u_proj - u_meas
+                v_res = v_proj - v_meas
+                total_err = np.sqrt(u_res**2 + v_res**2)
+            else:
+                u_proj, v_proj = np.nan, np.nan
+                u_res, v_res = np.nan, np.nan
+                total_err = np.nan
+            rows.append((phi, u_meas, v_meas, u_proj, v_proj, u_res, v_res, total_err))
+            u_res_list.append(u_res)
+            v_res_list.append(v_res)
+            total_err_list.append(total_err)
+            all_u_res.append(u_res)
+            all_v_res.append(v_res)
+
+        df = pd.DataFrame(
+            rows,
+            columns=[
+                "phi",
+                "u_meas",
+                "v_meas",
+                "u_proj",
+                "v_proj",
+                "u_res",
+                "v_res",
+                "total_err",
+            ],
+        )
+        csv_path = os.path.join(diag_dir, f"residuals_bead{k}.csv")
+        df.to_csv(csv_path, index=False)
+
+        u_res_arr = df["u_res"].values
+        v_res_arr = df["v_res"].values
+        total_arr = df["total_err"].values
+
+        print(f"\n--- bead {k} ---")
+        print(
+            f"  u_res: mean={np.nanmean(u_res_arr):.3f}, std={np.nanstd(u_res_arr):.3f}, median={np.nanmedian(u_res_arr):.3f}"
+        )
+        print(
+            f"  v_res: mean={np.nanmean(v_res_arr):.3f}, std={np.nanstd(v_res_arr):.3f}, median={np.nanmedian(v_res_arr):.3f}"
+        )
+        outlier_count = np.sum(total_arr > 30)
+        print(
+            f"  total: rms={np.sqrt(np.nanmean(total_arr**2)):.3f}, median_abs={np.nanmedian(total_arr):.3f}, outliers(>30px)={outlier_count}/{len(total_arr)}"
+        )
+
+        phi_arr = df["phi"].values
+        H_u = np.column_stack([np.ones(len(phi_arr)), np.cos(phi_arr), np.sin(phi_arr)])
+        try:
+            C_u, A_cos_u, A_sin_u = np.linalg.lstsq(H_u, u_res_arr, rcond=None)[0]
+            u_fit = C_u + A_cos_u * np.cos(phi_arr) + A_sin_u * np.sin(phi_arr)
+            u_fit_res = u_res_arr - u_fit
+            print(
+                f"  u_res sin fit: A_cos={A_cos_u:.4f}, A_sin={A_sin_u:.4f}, C={C_u:.4f}, residual_std={np.std(u_fit_res):.4f}"
+            )
+        except:
+            pass
+
+        H_v = np.column_stack([np.ones(len(phi_arr)), np.cos(phi_arr), np.sin(phi_arr)])
+        try:
+            C_v, A_cos_v, A_sin_v = np.linalg.lstsq(H_v, v_res_arr, rcond=None)[0]
+            v_fit = C_v + A_cos_v * np.cos(phi_arr) + A_sin_v * np.sin(phi_arr)
+            v_fit_res = v_res_arr - v_fit
+            print(
+                f"  v_res sin fit: A_cos={A_cos_v:.4f}, A_sin={A_sin_v:.4f}, C={C_v:.4f}, residual_std={np.std(v_fit_res):.4f}"
+            )
+        except:
+            pass
+
+    all_u_res = np.array(all_u_res)
+    all_v_res = np.array(all_v_res)
+
+    fig1, axes1 = plt.subplots(2, 6, figsize=(24, 8))
+    for k in range(6):
+        bead_obs = [(phi, b, u, v) for phi, b, u, v in observations if b == k]
+        if len(bead_obs) == 0:
+            axes1[0, k].set_title(f"bead {k}")
+            axes1[1, k].set_title(f"bead {k}")
+            continue
+        phi_list = [x[0] for x in bead_obs]
+        u_list = [x[2] for x in bead_obs]
+        v_list = [x[3] for x in bead_obs]
+
+        u_proj_list = []
+        v_proj_list = []
+        for phi, _, u_m, v_m in bead_obs:
+            P = refined_positions[k]
+            proj = reproject(
+                P,
+                phi,
+                best_SOD,
+                best_SDD,
+                u0_est,
+                v0,
+                best_eta,
+                du,
+                dv,
+                best_ax,
+                best_ay,
+            )
+            if proj:
+                u_proj_list.append(proj[0])
+                v_proj_list.append(proj[1])
+            else:
+                u_proj_list.append(np.nan)
+                v_proj_list.append(np.nan)
+
+        u_res_arr = np.array(u_proj_list) - np.array(u_list)
+        v_res_arr = np.array(v_proj_list) - np.array(v_list)
+        rms = np.sqrt(np.nanmean(u_res_arr**2 + v_res_arr**2))
+
+        axes1[0, k].scatter(phi_list, u_res_arr, alpha=0.3, s=10)
+        axes1[0, k].set_title(f"bead {k}, rms={rms:.2f}")
+        axes1[0, k].set_xlabel("phi")
+        axes1[0, k].axhline(0, color="r", linestyle="--", lw=0.5)
+        axes1[1, k].scatter(phi_list, v_res_arr, alpha=0.3, s=10)
+        axes1[1, k].set_title(f"bead {k}")
+        axes1[1, k].set_xlabel("phi")
+        axes1[1, k].axhline(0, color="r", linestyle="--", lw=0.5)
+    for k in range(6):
+        axes1[0, k].set_ylabel("u_res (px)")
+        axes1[1, k].set_ylabel("v_res (px)")
+    fig1.suptitle(
+        f"Residuals vs angle (SOD={best_SOD:.1f}, SDD={best_SDD:.1f}, eta={best_eta:.6f}, ax={best_ax:.3f}, ay={best_ay:.3f})"
+    )
+    fig1.tight_layout()
+    fig1.savefig(os.path.join(diag_dir, "residuals_vs_angle.png"), dpi=150)
+    print(f"\nSaved {os.path.join(diag_dir, 'residuals_vs_angle.png')}")
+
+    fig2, axes2 = plt.subplots(1, 2, figsize=(12, 5))
+    valid_u = all_u_res[~np.isnan(all_u_res)]
+    valid_v = all_v_res[~np.isnan(all_v_res)]
+    axes2[0].hist(valid_u, bins=50, alpha=0.7)
+    axes2[0].axvline(
+        np.mean(valid_u),
+        color="r",
+        linestyle="--",
+        label=f"mean={np.mean(valid_u):.3f}",
+    )
+    axes2[0].axvline(
+        np.std(valid_u), color="g", linestyle="--", label=f"std={np.std(valid_u):.3f}"
+    )
+    outlier_pct_u = np.sum(np.abs(valid_u) > 30) / len(valid_u) * 100
+    axes2[0].set_title(f"u_res histogram (outliers >30px: {outlier_pct_u:.1f}%)")
+    axes2[0].set_xlabel("u_res (px)")
+    axes2[0].legend()
+    axes2[1].hist(valid_v, bins=50, alpha=0.7)
+    axes2[1].axvline(
+        np.mean(valid_v),
+        color="r",
+        linestyle="--",
+        label=f"mean={np.mean(valid_v):.3f}",
+    )
+    axes2[1].axvline(
+        np.std(valid_v), color="g", linestyle="--", label=f"std={np.std(valid_v):.3f}"
+    )
+    outlier_pct_v = np.sum(np.abs(valid_v) > 30) / len(valid_v) * 100
+    axes2[1].set_title(f"v_res histogram (outliers >30px: {outlier_pct_v:.1f}%)")
+    axes2[1].set_xlabel("v_res (px)")
+    axes2[1].legend()
+    fig2.suptitle("Residual histograms")
+    fig2.tight_layout()
+    fig2.savefig(os.path.join(diag_dir, "residuals_hist.png"), dpi=150)
+    print(f"Saved {os.path.join(diag_dir, 'residuals_hist.png')}")
+
+    print("\n=== Done ===")

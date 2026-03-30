@@ -243,10 +243,10 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     cb = ConeBeam(
-        SOD=910.7,
+        SOD=885.41,
         TN=768,
         TM=972,
-        SDD=978.11,
+        SDD=850.00,
         NX=512,
         NY=512,
         NZ=512,
@@ -256,7 +256,7 @@ if __name__ == "__main__":
         number_of_img=360,
         proj_path=r"/home/foods/pro/data/20260327-jz-1/",
         detectorX=916.88,
-        detectorY=475.67,
+        detectorY=1013.91,
         pixel_size_raw=0.0748,
         sx=0.5,
         sy=0.5,
@@ -264,14 +264,30 @@ if __name__ == "__main__":
         rescale_slope=1.0,
         rescale_intercept=0.0,
     )
-    cb.eta = 0.000062
+    cb.eta = 0.013794
     cb.load_img()
     rec = cb.reconstruct()
     print(rec.shape, rec.dtype)
 
-    output_dir = "/home/foods/pro/pyct_old/pyct/recon_output/phaseC/"
+    print(
+        f"[Stats] min={rec.min():.6f}, max={rec.max():.6f}, mean={rec.mean():.6f}, std={rec.std():.6f}"
+    )
+    rec_pos = rec[rec > 0]
+    if len(rec_pos) > 0:
+        print(f"[Stats] mean of >0 voxels: {rec_pos.mean():.6f}")
+
+    rec_raw = rec.astype(np.float32)
+    rec_scaled = (rec / rec.max() * 1000).astype(np.int16)
+
+    output_dir = "/home/foods/pro/pyct_old/pyct/recon_output/phaseB_joint_sod_sdd/"
     os.makedirs(output_dir, exist_ok=True)
-    nii_path = os.path.join(output_dir, "phaseC_rec.nii.gz")
-    nii_img = nib.Nifti1Image(rec, np.eye(4))
+
+    nii_path_raw = os.path.join(output_dir, "phaseB_joint_sod_sdd_rec_raw.nii.gz")
+    nii_img_raw = nib.Nifti1Image(rec_raw, np.eye(4))
+    nib.save(nii_img_raw, nii_path_raw)
+    print(f"Saved {nii_path_raw}")
+
+    nii_path = os.path.join(output_dir, "phaseB_joint_sod_sdd_rec.nii.gz")
+    nii_img = nib.Nifti1Image(rec_scaled, np.eye(4))
     nib.save(nii_img, nii_path)
     print(f"Saved {nii_path}")
