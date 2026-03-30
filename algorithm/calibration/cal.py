@@ -267,23 +267,18 @@ class Calibration:
         return round(SOD, 2), round(SDD, 2), round(u0, 2), round(v0, 2), round(theta, 2)
 
 
-def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv, theta=0.0):
+def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv, vc=0.0, vs=0.0):
     """
     将3D点P投影到探测器平面，返回像素坐标 (u_proj, v_proj)。
-    探测器面内旋转角 theta（弧度）。
+    v0 随角度正弦变化：v0_eff(phi) = v0 + vc*cos(phi) + vs*sin(phi)
     """
     ODD = SDD - SOD
 
     src = np.array([np.sin(phi) * SOD, -np.cos(phi) * SOD, 0.0])
     det0 = np.array([-np.sin(phi) * ODD, np.cos(phi) * ODD, 0.0])
 
-    u_base = np.array([np.cos(phi), np.sin(phi), 0.0])
-    v_base = np.array([-eta * np.sin(phi), eta * np.cos(phi), -1.0])
-
-    ct = np.cos(theta)
-    st = np.sin(theta)
-    u_dir = ct * u_base + st * v_base
-    v_dir = -st * u_base + ct * v_base
+    u_dir = np.array([np.cos(phi), np.sin(phi), 0.0])
+    v_dir = np.array([-eta * np.sin(phi), eta * np.cos(phi), -1.0])
 
     n_hat = np.cross(u_dir, v_dir)
 
@@ -298,7 +293,12 @@ def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv, theta=0.0):
 
     delta = hit - det0
     u_proj = u0 + np.dot(delta, u_dir) / du
-    v_proj = v0 + np.dot(delta, v_dir) / (dv * np.dot(v_dir, v_dir))
+    v_proj = (
+        v0
+        + np.dot(delta, v_dir) / (dv * np.dot(v_dir, v_dir))
+        + vc * np.cos(phi)
+        + vs * np.sin(phi)
+    )
 
     return (u_proj, v_proj)
 
@@ -307,10 +307,10 @@ def joint_optimize(
     observations, SOD_init, SDD_init, u0_fixed, v0_fixed, du, dv, init_positions
 ):
     """
-    联合优化 eta, SOD, SDD, theta 和珠子 3D 位置。v0 固定。
+    联合优化 eta, SOD, SDD, vc, vs 和珠子 3D 位置。v0 固定。
 
-    参数向量: [eta, SOD, SDD, theta, x0,y0,z0, x1,y1,z1, ..., x5,y5,z5]
-    共 4 + 18 = 22 个参数
+    参数向量: [eta, SOD, SDD, vc, vs, x0,y0,z0, x1,y1,z1, ..., x5,y5,z5]
+    共 5 + 18 = 23 个参数
 
     参数:
         observations: [(phi, bead_idx, u, v), ...]
@@ -321,17 +321,18 @@ def joint_optimize(
         init_positions: shape (6, 3), 初始珠子位置
 
     返回:
-        (best_eta, best_SOD, best_SDD, best_theta, refined_positions, final_rms, rms_init)
+        (best_eta, best_SOD, best_SDD, best_vc, best_vs, refined_positions, final_rms, rms_init)
     """
     n_beads = 6
-    n_geom = 4  # eta, SOD, SDD, theta
+    n_geom = 5  # eta, SOD, SDD, vc, vs
     n_params = n_geom + n_beads * 3
 
     x0 = np.zeros(n_params)
     x0[0] = 0.0  # eta
     x0[1] = SOD_init  # SOD
     x0[2] = SDD_init  # SDD
-    x0[3] = 0.0  # theta
+    x0[3] = 0.0  # vc
+    x0[4] = 0.0  # vs
     for k in range(n_beads):
         x0[n_geom + k * 3 : n_geom + (k + 1) * 3] = init_positions[k]
 
@@ -343,8 +344,10 @@ def joint_optimize(
     ub[1] = 1100.0
     lb[2] = 800.0
     ub[2] = 1200.0
-    lb[3] = -0.1
-    ub[3] = 0.1
+    lb[3] = -30.0
+    ub[3] = 30.0
+    lb[4] = -30.0
+    ub[4] = 30.0
     for k in range(n_beads):
         base = n_geom + k * 3
         for i in range(3):
@@ -355,12 +358,13 @@ def joint_optimize(
         eta = params[0]
         SOD = params[1]
         SDD = params[2]
-        theta = params[3]
+        vc = params[3]
+        vs = params[4]
         res = []
         for phi, bead_idx, u_meas, v_meas in observations:
             bead_params = params[n_geom + bead_idx * 3 : n_geom + (bead_idx + 1) * 3]
             P = np.array(bead_params)
-            proj = reproject(P, phi, SOD, SDD, u0_fixed, v0_fixed, eta, du, dv, theta)
+            proj = reproject(P, phi, SOD, SDD, u0_fixed, v0_fixed, eta, du, dv, vc, vs)
             if proj is not None:
                 res.append(proj[0] - u_meas)
                 res.append(proj[1] - v_meas)
@@ -378,6 +382,30 @@ def joint_optimize(
         f_scale=2.0,
         x_scale="jac",
         max_nfev=10000,
+    )
+
+    best_eta = result.x[0]
+    best_SOD = result.x[1]
+    best_SDD = result.x[2]
+    best_vc = result.x[3]
+    best_vs = result.x[4]
+    refined_positions = np.zeros((6, 3))
+    for k in range(6):
+        refined_positions[k] = result.x[n_geom + k * 3 : n_geom + (k + 1) * 3]
+
+    errors = residuals(result.x)
+    final_rms = np.sqrt(np.mean(errors**2))
+    rms_init = np.sqrt(np.mean(residuals(x0) ** 2))
+
+    return (
+        best_eta,
+        best_SOD,
+        best_SDD,
+        best_vc,
+        best_vs,
+        refined_positions,
+        final_rms,
+        rms_init,
     )
 
     best_eta = result.x[0]
@@ -447,16 +475,19 @@ if __name__ == "__main__":
     print(f"theoretical slope (-SDD/(SOD*du)): {slope_theory:.4f}")
     print(f"slope error: {(slope - slope_theory) / slope_theory * 100:.2f}%")
 
-    print("\n=== Joint optimization: eta + SOD + SDD + theta + bead positions ===")
+    print("\n=== Joint optimization: eta + SOD + SDD + vc + vs + bead positions ===")
     (
         best_eta,
         best_SOD,
         best_SDD,
-        best_theta,
+        best_vc,
+        best_vs,
         refined_positions,
         final_rms,
         rms_init,
     ) = joint_optimize(observations, SOD, SDD, u0_est, v0, du, dv, bead_positions)
+    vc_amp = np.sqrt(best_vc**2 + best_vs**2)
+    vc_phase = np.arctan2(best_vs, best_vc) * 180 / np.pi
     print(f"\n--- Parameter comparison ---")
     print(f"eta:   init=0.000000  ->  opt={best_eta:.6f}")
     print(
@@ -465,9 +496,9 @@ if __name__ == "__main__":
     print(
         f"SDD:   init={SDD:.2f}  ->  opt={best_SDD:.2f}  (delta={best_SDD - SDD:.2f})"
     )
-    print(
-        f"theta: init=0.000000  ->  opt={best_theta:.6f}  ({best_theta * 180 / np.pi:.4f} deg)"
-    )
+    print(f"vc:    init=0.000000  ->  opt={best_vc:.6f}")
+    print(f"vs:    init=0.000000  ->  opt={best_vs:.6f}")
+    print(f"v-shift amplitude: {vc_amp:.4f} px, phase: {vc_phase:.2f} deg")
     print(f"v0:    fixed at {v0} (not optimized)")
     print(f"u0:    fixed at {u0_est:.2f} (not optimized)")
     if best_SDD <= best_SOD:
@@ -498,7 +529,8 @@ if __name__ == "__main__":
                 best_eta,
                 du,
                 dv,
-                best_theta,
+                best_vc,
+                best_vs,
             )
             if proj is not None:
                 errors.append(
@@ -507,8 +539,11 @@ if __name__ == "__main__":
         if errors:
             print(f"  bead {k}: rms={np.sqrt(np.mean(np.array(errors) ** 2)):.3f} px")
     print(
-        f"\nOptimized params: SOD={best_SOD:.2f}, SDD={best_SDD:.2f}, u0={u0_est:.2f}, v0={v0:.2f}, eta={best_eta:.6f}, theta={best_theta:.6f}"
+        f"\nOptimized params: SOD={best_SOD:.2f}, SDD={best_SDD:.2f}, u0={u0_est:.2f}, v0={v0:.2f}, eta={best_eta:.6f}, vc={best_vc:.6f}, vs={best_vs:.6f}"
     )
+    vc_recon = best_vc * 0.5
+    vs_recon = best_vs * 0.5
+    print(f"For conebeam.py: vc_recon={vc_recon:.4f}, vs_recon={vs_recon:.4f}")
 
     print("\n=== Residual diagnostics ===")
     import os
@@ -546,7 +581,8 @@ if __name__ == "__main__":
                 best_eta,
                 du,
                 dv,
-                best_theta,
+                best_vc,
+                best_vs,
             )
             if proj is not None:
                 u_proj, v_proj = proj
@@ -647,7 +683,8 @@ if __name__ == "__main__":
                 best_eta,
                 du,
                 dv,
-                best_theta,
+                best_vc,
+                best_vs,
             )
             if proj:
                 u_proj_list.append(proj[0])
@@ -672,7 +709,7 @@ if __name__ == "__main__":
         axes1[0, k].set_ylabel("u_res (px)")
         axes1[1, k].set_ylabel("v_res (px)")
     fig1.suptitle(
-        f"Residuals vs angle (SOD={best_SOD:.1f}, SDD={best_SDD:.1f}, eta={best_eta:.6f}, theta={best_theta:.4f} rad)"
+        f"Residuals vs angle (SOD={best_SOD:.1f}, SDD={best_SDD:.1f}, eta={best_eta:.6f}, vc={best_vc:.3f}, vs={best_vs:.3f})"
     )
     fig1.tight_layout()
     fig1.savefig(os.path.join(diag_dir, "residuals_vs_angle.png"), dpi=150)
