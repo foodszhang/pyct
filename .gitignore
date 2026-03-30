@@ -70,3 +70,8 @@ ni*.raw
 
 # Configuration (may contain sensitive port settings)
 # config.yaml
+#
+# output
+.python_build/
+.venv_build/
+build_output/
