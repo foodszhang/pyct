@@ -60,7 +60,9 @@ class ConeBeam:
         self.rescale_intercept = rescale_intercept
         self.I0 = 65535.0
         self.eta = 0.0
-        print(f"[Geometry] eta = {self.eta}")
+        self.vc = 0.0
+        self.vs = 0.0
+        print(f"[Geometry] eta = {self.eta}, vc = {self.vc}, vs = {self.vs}")
 
     def load_from_dict(self, img_dict):
         self.data = np.zeros((self.TM, len(img_dict), self.TN), dtype=np.float32)
@@ -96,7 +98,7 @@ class ConeBeam:
         )
         self.proj_geom = ast.create_proj_geom("cone_vec", self.TM, self.TN, vectors)
 
-    def build_cone_vec(self, angles, SOD, SDD, u0, v0, eta=0.0):
+    def build_cone_vec(self, angles, SOD, SDD, u0, v0, eta=0.0, vc=0.0, vs=0.0):
         """
         构建 ASTRA cone_vec 几何矩阵。
 
@@ -107,6 +109,8 @@ class ConeBeam:
         - u0     : float, 光轴打到探测器的水平像素坐标（缩放后图像坐标系）
         - v0     : float, 光轴打到探测器的竖直像素坐标（缩放后图像坐标系）
         - eta    : float, 探测器倾斜参数（无量纲）
+        - vc     : float, v-shift cosine coefficient (recon pixels)
+        - vs     : float, v-shift sine coefficient (recon pixels)
         """
         ODD = SDD - SOD
 
@@ -137,7 +141,8 @@ class ConeBeam:
             dZ_on_axis = 0.0
 
             shift_u_pix = self.TN / 2.0 - u0
-            shift_v_pix = self.TM / 2.0 - v0
+            v_shift = vc * cp + vs * sp
+            shift_v_pix = self.TM / 2.0 - v0 + v_shift
 
             dX = dX_on_axis + shift_u_pix * uX + shift_v_pix * vX
             dY = dY_on_axis + shift_u_pix * uY + shift_v_pix * vY
@@ -195,6 +200,8 @@ class ConeBeam:
             self.detectorX_recon,
             self.detectorY_recon,
             eta=self.eta,
+            vc=self.vc,
+            vs=self.vs,
         )
         self.proj_geom = ast.create_proj_geom("cone_vec", self.TM, self.TN, vectors)
         self.proj_id = ast.data3d.create("-proj3d", self.proj_geom, self.data)
@@ -202,7 +209,7 @@ class ConeBeam:
         print("[Geometry] Using cone_vec geometry (no postalignment)")
         print(f"[Geometry] SOD = {self.SOD}, SDD = {self.SDD}")
         print(f"[Geometry] u0 = {self.detectorX_recon}, v0 = {self.detectorY_recon}")
-        print(f"[Geometry] eta = {self.eta}")
+        print(f"[Geometry] eta = {self.eta}, vc = {self.vc}, vs = {self.vs}")
 
         print("[Preprocess] Using Beer-Lambert projection: -log(I/I0)")
         print(f"[Preprocess] I0 = {self.I0}")
@@ -239,14 +246,14 @@ if __name__ == "__main__":
     import nibabel as nib
     import os
 
-    output_dir = "/home/foods/pro/pyct_old/pyct/recon_output/phaseB/"
+    output_dir = "/home/foods/pro/pyct_old/pyct/recon_output/phaseD_calibrated/"
     os.makedirs(output_dir, exist_ok=True)
 
     cb = ConeBeam(
-        SOD=885.41,
+        SOD=908.8,
         TN=768,
         TM=972,
-        SDD=850.00,
+        SDD=959.6,
         NX=512,
         NY=512,
         NZ=512,
@@ -264,7 +271,9 @@ if __name__ == "__main__":
         rescale_slope=1.0,
         rescale_intercept=0.0,
     )
-    cb.eta = 0.013794
+    cb.eta = 0.0
+    cb.vc = -5.691
+    cb.vs = -7.434
     cb.load_img()
     rec = cb.reconstruct()
     print(rec.shape, rec.dtype)
@@ -279,15 +288,12 @@ if __name__ == "__main__":
     rec_raw = rec.astype(np.float32)
     rec_scaled = (rec / rec.max() * 1000).astype(np.int16)
 
-    output_dir = "/home/foods/pro/pyct_old/pyct/recon_output/phaseB_joint_sod_sdd/"
-    os.makedirs(output_dir, exist_ok=True)
-
-    nii_path_raw = os.path.join(output_dir, "phaseB_joint_sod_sdd_rec_raw.nii.gz")
+    nii_path_raw = os.path.join(output_dir, "phaseD_calibrated_rec_raw.nii.gz")
     nii_img_raw = nib.Nifti1Image(rec_raw, np.eye(4))
     nib.save(nii_img_raw, nii_path_raw)
     print(f"Saved {nii_path_raw}")
 
-    nii_path = os.path.join(output_dir, "phaseB_joint_sod_sdd_rec.nii.gz")
+    nii_path = os.path.join(output_dir, "phaseD_calibrated_rec.nii.gz")
     nii_img = nib.Nifti1Image(rec_scaled, np.eye(4))
     nib.save(nii_img, nii_path)
     print(f"Saved {nii_path}")
