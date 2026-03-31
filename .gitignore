@@ -75,3 +75,6 @@ ni*.raw
 .python_build/
 .venv_build/
 build_output/
+.python_build_setup.exe
+astra_pkg/
+detector_bridge/

@@ -5,23 +5,23 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import os
 import sys
-import numba as nb
 from scipy.optimize import minimize_scalar, least_squares
 
 
-@nb.jit(nopython=True)
 def circle_threshold(img, circle):
-    max_val = 0
-    min_val = 255
-    for i in range(int(circle[1] - circle[2]) - 2, int(circle[1] + circle[2]) + 2):
-        for j in range(int(circle[0] - circle[2]) - 1, int(circle[0] + circle[2]) + 2):
-            distance = np.sqrt((i - circle[1]) ** 2 + (j - circle[0]) ** 2)
-            if distance <= circle[2]:
-                if img[i, j] > max_val:
-                    max_val = img[i, j]
-                if img[i, j] < min_val:
-                    min_val = img[i, j]
-    return min_val, max_val
+    cx, cy, r = circle[0], circle[1], circle[2]
+    # Build row/col index grids for the bounding box
+    i_min = max(int(cy - r) - 2, 0)
+    i_max = min(int(cy + r) + 3, img.shape[0])
+    j_min = max(int(cx - r) - 1, 0)
+    j_max = min(int(cx + r) + 3, img.shape[1])
+    ii, jj = np.mgrid[i_min:i_max, j_min:j_max]
+    # Distance mask
+    mask = (ii - cy) ** 2 + (jj - cx) ** 2 <= r * r
+    pixels = img[ii[mask], jj[mask]]
+    if len(pixels) == 0:
+        return 0, 255
+    return int(pixels.min()), int(pixels.max())
 
 
 def hough_circles(img):

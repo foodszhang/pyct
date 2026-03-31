@@ -1,17 +1,15 @@
-# ============================================================
-# PyCT Windows 构建脚本
-# 用法：在仓库根目录打开 PowerShell，执行：
+﻿# ============================================================
+# PyCT Windows Build Script
+# Usage: cd to repo root, run:
 #   .\scripts\build_win.ps1
 #
-# 首次运行会自动下载 Python 3.10 embeddable 到 .python_build/，
-# 后续复用，不污染系统环境。
-#
-# 前置：Inno Setup 6 已安装（winget install JRSoftware.InnoSetup）
+# Prerequisites: uv, Inno Setup 6
+# First run will auto-setup Python 3.13 venv + astra wheel
 # ============================================================
 
 param(
-    [string]$PythonExe = "",          # 留空则自动使用本地便携 Python
-    [string]$InnoSetupExe = "",       # 留空则自动搜索
+    [string]$InnoSetupExe = "",
+    [string]$AstraWhl = "",
     [switch]$SkipVenv,
     [switch]$SkipInstaller,
     [switch]$Portable
@@ -25,254 +23,278 @@ Set-Location $RepoRoot
 $Version = "1.0.0"
 $BuildDir = "$RepoRoot\build_output"
 $DistDir = "$BuildDir\dist\PyCT"
+$VenvDir = "$RepoRoot\.venv_build"
+$VenvPython = "$VenvDir\Scripts\python.exe"
+$VenvPyInstaller = "$VenvDir\Scripts\pyinstaller.exe"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  PyCT 构建脚本 v$Version" -ForegroundColor Cyan
+Write-Host "  PyCT Build Script v$Version" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 # ============================================================
-# 自动获取纯净 Python 3.10（不污染系统）
-# ============================================================
-function Ensure-BuildPython {
-    param([string]$ManualPython)
-
-    if ($ManualPython -and (Test-Path $ManualPython)) {
-        Write-Host "  使用指定 Python: $ManualPython" -ForegroundColor Green
-        return $ManualPython
-    }
-
-    $PyBuildDir = "$RepoRoot\.python_build"
-    $PyInstaller = "$PyBuildDir\python.exe"
-
-    if (Test-Path $PyInstaller) {
-        Write-Host "  使用本地构建 Python: $PyInstaller" -ForegroundColor Green
-        return $PyInstaller
-    }
-
-    Write-Host "  未找到构建用 Python，正在下载 Python 3.10 安装版..." -ForegroundColor Yellow
-
-    # 下载 Python 3.10 nuget 包（自带 pip，比 embeddable 好用）
-    $PyVersion = "3.10.11"
-    $PyUrl = "https://www.python.org/ftp/python/$PyVersion/python-$PyVersion-amd64.exe"
-    $PySetup = "$RepoRoot\.python_build_setup.exe"
-
-    if (-not (Test-Path (Split-Path $PyBuildDir))) {
-        New-Item -ItemType Directory (Split-Path $PyBuildDir) -Force | Out-Null
-    }
-
-    # 下载
-    Write-Host "  下载 Python $PyVersion ..." -ForegroundColor Yellow
-    Invoke-WebRequest -Uri $PyUrl -OutFile $PySetup -UseBasicParsing
-
-    # 静默安装到本地目录（不写注册表、不加 PATH）
-    Write-Host "  静默安装到 $PyBuildDir ..." -ForegroundColor Yellow
-    & $PySetup /quiet `
-        InstallAllUsers=0 `
-        TargetDir="$PyBuildDir" `
-        DefaultAllUsersTargetDir="$PyBuildDir" `
-        AssociateFiles=0 `
-        Shortcuts=0 `
-        Include_launcher=0 `
-        Include_test=0 `
-        Include_doc=0 `
-        Include_tcltk=0 `
-        PrependPath=0 `
-        CompileAll=0
-
-    # 等待安装完成
-    Start-Sleep -Seconds 5
-
-    # 清理安装包
-    Remove-Item $PySetup -Force -ErrorAction SilentlyContinue
-
-    if (-not (Test-Path $PyInstaller)) {
-        Write-Error "Python 安装失败：未找到 $PyInstaller"
-        Write-Error "请手动安装 Python 3.10 并使用 -PythonExe 参数指定路径"
-        exit 1
-    }
-
-    # 确保 pip 可用
-    & $PyInstaller -m ensurepip --upgrade 2>$null
-    & $PyInstaller -m pip install --upgrade pip
-
-    Write-Host "  Python $PyVersion 安装完成: $PyInstaller" -ForegroundColor Green
-    return $PyInstaller
-}
-
-# ============================================================
-# 自动查找 Inno Setup
+# Find Inno Setup
 # ============================================================
 function Find-InnoSetup {
     param([string]$ManualPath)
 
-    if ($ManualPath -and (Test-Path $ManualPath)) {
-        return $ManualPath
-    }
+    if ($ManualPath -and (Test-Path $ManualPath)) { return $ManualPath }
 
     $candidates = @(
-        # D 盘（你的实际安装位置）
         "D:\Program Files (x86)\Inno Setup 6\ISCC.exe",
         "D:\Program Files\Inno Setup 6\ISCC.exe",
-        # winget 用户级安装
         "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
-        # 传统安装（C 盘）
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
         "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
-        # Scoop
         "$env:USERPROFILE\scoop\apps\inno-setup\current\ISCC.exe"
     )
-
     foreach ($c in $candidates) {
         if (Test-Path $c) {
-            Write-Host "  找到 Inno Setup: $c" -ForegroundColor Green
+            Write-Host "  Found Inno Setup: $c" -ForegroundColor Green
             return $c
         }
     }
-
     $inPath = Get-Command ISCC -ErrorAction SilentlyContinue
     if ($inPath) {
-        Write-Host "  找到 Inno Setup (PATH): $($inPath.Source)" -ForegroundColor Green
+        Write-Host "  Found Inno Setup (PATH): $($inPath.Source)" -ForegroundColor Green
         return $inPath.Source
     }
-
     return $null
 }
 
 # ============================================================
-# 开始构建
+# Find astra wheel
 # ============================================================
+function Find-AstraWhl {
+    param([string]$ManualPath)
 
-# ---- 0. 获取纯净 Python ----
-Write-Host "`n[0/5] 准备构建用 Python 环境..." -ForegroundColor Yellow
-$BuildPython = Ensure-BuildPython -ManualPython $PythonExe
+    if ($ManualPath -and (Test-Path $ManualPath)) { return $ManualPath }
 
-# ---- 1. 创建 venv ----
-$VenvDir = "$RepoRoot\.venv_build"
-$VenvPython = "$VenvDir\Scripts\python.exe"
-$VenvPip = "$VenvDir\Scripts\pip.exe"
+    $searchPaths = @(
+        "$RepoRoot\astra_pkg",
+        "$RepoRoot\deps",
+        "$RepoRoot\scripts\deps",
+        "$env:USERPROFILE\Downloads"
+    )
+    foreach ($dir in $searchPaths) {
+        if (Test-Path $dir) {
+            $whl = Get-ChildItem $dir -Recurse -Filter "astra_toolbox*cp313*win_amd64.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($whl) {
+                Write-Host "  Found astra wheel: $($whl.FullName)" -ForegroundColor Green
+                return $whl.FullName
+            }
+        }
+    }
+    return $null
+}
 
+# ============================================================
+# [0/5] Check uv
+# ============================================================
+Write-Host "`n[0/5] Checking prerequisites..." -ForegroundColor Yellow
+$uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $uvCmd) {
+    Write-Error "uv not found. Install it first: winget install astral-sh.uv"
+    exit 1
+}
+Write-Host "  uv: $($uvCmd.Source)" -ForegroundColor Green
+
+# ============================================================
+# [1/5] Create venv (Python 3.13 via uv)
+# ============================================================
 if (-not $SkipVenv) {
-    Write-Host "`n[1/5] 创建构建虚拟环境..." -ForegroundColor Yellow
+    Write-Host "`n[1/5] Creating Python 3.13 build venv..." -ForegroundColor Yellow
+
+    # Ensure Python 3.13 is available
+    Write-Host "  Ensuring Python 3.13 is installed..."
+    $ErrorActionPreference = "Continue"
+    & uv python install 3.13 2>&1 | Out-Null
+    $ErrorActionPreference = "Stop"
+
+    # Create venv
     if (Test-Path $VenvDir) {
         Remove-Item -Recurse -Force $VenvDir
     }
-    & $BuildPython -m venv $VenvDir
+    & uv venv $VenvDir --python 3.13
+    Write-Host "  venv created at $VenvDir" -ForegroundColor Green
 
-    Write-Host "  安装项目依赖..."
-    & $VenvPip install --upgrade pip
-    & $VenvPip install -r "$RepoRoot\requirements_qt.txt"
-    & $VenvPip install pyinstaller
-    Write-Host "  venv 创建完成" -ForegroundColor Green
+    # Install dependencies via uv pip
+    Write-Host "  Installing project dependencies..."
+    & uv pip install -r "$RepoRoot\requirements_qt.txt" -p $VenvPython
+    & uv pip install pyinstaller -p $VenvPython
+
+    # Install astra wheel
+    Write-Host "  Looking for astra-toolbox wheel..."
+    $whl = Find-AstraWhl -ManualPath $AstraWhl
+    if ($whl) {
+        Write-Host "  Installing astra from: $whl"
+        & uv pip install $whl -p $VenvPython
+    } else {
+        Write-Warning "  astra wheel not found!"
+        Write-Warning "  Download from: https://github.com/astra-toolbox/astra-toolbox/releases"
+        Write-Warning "  Then either:"
+        Write-Warning "    - Put the .whl in $RepoRoot\astra_pkg\"
+        Write-Warning "    - Or pass -AstraWhl 'path\to\astra_toolbox-xxx.whl'"
+    }
+
+    # Verify environment
+    Write-Host "`n  --- Environment Check ---" -ForegroundColor Cyan
+    & $VenvPython -c "import sys; print(f'  Python: {sys.version}')"
+
+    $ErrorActionPreference = "Continue"
+    & $VenvPython -c "import astra; print(f'  ASTRA: {astra.__version__}, CUDA: {astra.use_cuda()}')" 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "  ASTRA not available - CUDA reconstruction will not work in packaged app"
+    }
+    & $VenvPython -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')" 2>&1 | Out-Host
+    $ErrorActionPreference = "Stop"
+
+    Write-Host "  --------------------------" -ForegroundColor Cyan
+
 } else {
-    Write-Host "`n[1/5] 跳过 venv 创建（使用已有环境）" -ForegroundColor Gray
+    Write-Host "`n[1/5] Skipping venv creation (using existing)" -ForegroundColor Gray
     if (-not (Test-Path $VenvPython)) {
-        Write-Error "未找到已有 venv，请去掉 -SkipVenv 重新运行"
+        Write-Error "No existing venv found at $VenvDir. Run without -SkipVenv."
         exit 1
     }
 }
 
-# ---- 2. PyInstaller 打包 ----
-Write-Host "`n[2/5] PyInstaller 打包..." -ForegroundColor Yellow
+# ============================================================
+# [2/5] PyInstaller
+# ============================================================
+Write-Host "`n[2/5] PyInstaller packaging..." -ForegroundColor Yellow
 if (Test-Path $BuildDir) {
     Remove-Item -Recurse -Force $BuildDir
 }
 
-& "$VenvDir\Scripts\pyinstaller.exe" `
+& $VenvPyInstaller `
     --noconfirm `
     --distpath "$BuildDir\dist" `
     --workpath "$BuildDir\work" `
-    --specpath "$BuildDir" `
     "$RepoRoot\scripts\pyct.spec"
 
 if (-not (Test-Path "$DistDir\PyCT.exe")) {
-    Write-Error "PyInstaller 打包失败：未找到 PyCT.exe"
+    Write-Error "PyInstaller failed: PyCT.exe not found"
     exit 1
 }
-Write-Host "  PyCT.exe 生成成功" -ForegroundColor Green
+Write-Host "  PyCT.exe created" -ForegroundColor Green
 
-# ---- 3. 复制额外资源 ----
-Write-Host "`n[3/5] 复制额外资源..." -ForegroundColor Yellow
+# ============================================================
+# [3/5] Copy resources
+# ============================================================
+Write-Host "`n[3/5] Copying resources..." -ForegroundColor Yellow
 
-# config
+# --- config ---
 if (-not (Test-Path "$DistDir\config")) { New-Item -ItemType Directory "$DistDir\config" | Out-Null }
 Copy-Item "$RepoRoot\config.yaml" "$DistDir\config\default_config.yaml" -Force
 
-# detector_bridge
+# --- detector_bridge + py34 ---
 $DetBridge = "$DistDir\detector_bridge"
 if (-not (Test-Path $DetBridge)) { New-Item -ItemType Directory $DetBridge | Out-Null }
 Copy-Item "$RepoRoot\detector.py" "$DetBridge\detector.py" -Force -ErrorAction SilentlyContinue
 
+# Python 3.4 portable
+$Py34Sources = @(
+    "$RepoRoot\detector_bridge\py34",
+    "C:\Python34",
+    "D:\Python34"
+)
+$Py34Copied = $false
+foreach ($src in $Py34Sources) {
+    if (Test-Path "$src\python.exe") {
+        Write-Host "  Copying Python 3.4 from: $src" -ForegroundColor Yellow
+        $dest = "$DetBridge\py34"
+        if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+        Copy-Item $src $dest -Recurse -Force
+        $Py34Copied = $true
+        Write-Host "  Python 3.4 copied" -ForegroundColor Green
+        break
+    }
+}
+if (-not $Py34Copied) {
+    Write-Warning "  Python 3.4 not found. Scanning feature will not work."
+    Write-Warning "  Place Python 3.4 in: $RepoRoot\detector_bridge\py34\"
+}
+
+# detector_bridge README
 @"
 # Detector Bridge (Python 3.4)
-
-此目录用于放置 Python 3.4 运行时和设备 SDK。
-
-## 设置步骤：
-1. 将 Python 3.4 便携版解压到 py34\ 子目录
-   结构：detector_bridge\py34\python.exe
-2. 将设备 SDK 的 DLL 放到 py34\Lib\site-packages\ 或系统 PATH 中
-3. 安装 detector 依赖：py34\python.exe -m pip install <所需包>
-
-## 注意：
-- 如果没有设备/SDK，校准和重建功能不受影响
-- 主程序会自动检测 py34 是否可用，不可用时进入离线模式
+Place Python 3.4 portable runtime in py34\ subdirectory.
+Structure: detector_bridge\py34\python.exe
+Without py34, calibration and reconstruction still work (offline mode).
 "@ | Out-File -Encoding utf8 "$DetBridge\README.txt"
 
-# docs
+# --- vc_redist (from astra package if available) ---
+$VcRedist = Get-ChildItem "$RepoRoot\astra_pkg" -Recurse -Filter "vc_redist.x64.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($VcRedist) {
+    if (-not (Test-Path "$DistDir\redist")) { New-Item -ItemType Directory "$DistDir\redist" | Out-Null }
+    Copy-Item $VcRedist.FullName "$DistDir\redist\vc_redist.x64.exe" -Force
+    Write-Host "  vc_redist.x64.exe copied" -ForegroundColor Green
+}
+
+# --- docs ---
 if (-not (Test-Path "$DistDir\docs")) { New-Item -ItemType Directory "$DistDir\docs" | Out-Null }
 if (Test-Path "$RepoRoot\scripts\Offline_Install_Guide.md") {
     Copy-Item "$RepoRoot\scripts\Offline_Install_Guide.md" "$DistDir\docs\" -Force
 }
 
-Write-Host "  资源复制完成" -ForegroundColor Green
+# --- SDK DLLs ---
+$SdkDir = "$RepoRoot\detector_bridge\sdk"
+if (Test-Path $SdkDir) {
+    Copy-Item $SdkDir "$DetBridge\sdk" -Recurse -Force
+    Write-Host "  Detector SDK copied" -ForegroundColor Green
+}
 
-# ---- 4. 生成安装包 ----
+Write-Host "  Resources copied" -ForegroundColor Green
+
+# ============================================================
+# [4/5] Inno Setup installer
+# ============================================================
 if (-not $SkipInstaller) {
-    Write-Host "`n[4/5] Inno Setup 生成安装包..." -ForegroundColor Yellow
+    Write-Host "`n[4/5] Inno Setup building installer..." -ForegroundColor Yellow
     $ISCC = Find-InnoSetup -ManualPath $InnoSetupExe
 
     if (-not $ISCC) {
-        Write-Warning "=========================================="
-        Write-Warning "  未找到 Inno Setup！"
-        Write-Warning "  安装方式（任选其一）："
-        Write-Warning "    winget install JRSoftware.InnoSetup"
-        Write-Warning "    https://jrsoftware.org/isdl.php"
-        Write-Warning "  或手动指定路径："
-        Write-Warning "    .\scripts\build_win.ps1 -InnoSetupExe 'D:\...\ISCC.exe'"
-        Write-Warning "=========================================="
-        Write-Warning "  跳过安装包生成（dist 目录仍可直接使用）"
+        Write-Warning "  Inno Setup not found!"
+        Write-Warning "  Install: winget install JRSoftware.InnoSetup"
+        Write-Warning "  Or pass: -InnoSetupExe 'D:\...\ISCC.exe'"
+        Write-Warning "  Skipping installer (dist folder is still usable)"
     } else {
         & $ISCC "/DAppVersion=$Version" "/DDistDir=$DistDir" "/DOutputDir=$BuildDir\installer" "$RepoRoot\scripts\setup.iss"
-        Write-Host "  安装包生成完成" -ForegroundColor Green
+        Write-Host "  Installer created" -ForegroundColor Green
     }
 } else {
-    Write-Host "`n[4/5] 跳过安装包生成" -ForegroundColor Gray
+    Write-Host "`n[4/5] Skipping installer" -ForegroundColor Gray
 }
 
-# ---- 5. Portable zip（可选） ----
+# ============================================================
+# [5/5] Portable zip (optional)
+# ============================================================
 if ($Portable) {
-    Write-Host "`n[5/5] 生成便携版 zip..." -ForegroundColor Yellow
+    Write-Host "`n[5/5] Creating portable zip..." -ForegroundColor Yellow
     $ZipPath = "$BuildDir\PyCT_Portable_$Version.zip"
     if (Test-Path $ZipPath) { Remove-Item $ZipPath }
     Compress-Archive -Path "$DistDir\*" -DestinationPath $ZipPath
-    Write-Host "  便携版：$ZipPath" -ForegroundColor Green
+    Write-Host "  Portable: $ZipPath" -ForegroundColor Green
 } else {
-    Write-Host "`n[5/5] 跳过便携版" -ForegroundColor Gray
+    Write-Host "`n[5/5] Skipping portable zip" -ForegroundColor Gray
 }
 
-# ---- 完成 ----
+# ============================================================
+# Done
+# ============================================================
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  构建完成！" -ForegroundColor Cyan
-Write-Host "  构建 Python: $BuildPython" -ForegroundColor Gray
-Write-Host "  dist 目录：$DistDir" -ForegroundColor White
+Write-Host "  Build complete!" -ForegroundColor Cyan
+Write-Host "  dist: $DistDir" -ForegroundColor White
 $SetupFiles = Get-ChildItem "$BuildDir\installer\PyCT_Setup_*.exe" -ErrorAction SilentlyContinue
 if ($SetupFiles) {
-    Write-Host "  安装包：$($SetupFiles[0].FullName)" -ForegroundColor White
+    Write-Host "  Installer: $($SetupFiles[0].FullName)" -ForegroundColor White
+}
+if (Test-Path "$BuildDir\PyCT_Portable_*.zip") {
+    $zip = Get-ChildItem "$BuildDir\PyCT_Portable_*.zip" | Select-Object -First 1
+    Write-Host "  Portable: $($zip.FullName)" -ForegroundColor White
 }
 Write-Host "========================================" -ForegroundColor Cyan
 
-# ---- 清理提示 ----
-Write-Host "`n提示：" -ForegroundColor Gray
-Write-Host "  - 构建用 Python 在 .python_build\（可删除或复用）" -ForegroundColor Gray
-Write-Host "  - 构建用 venv 在 .venv_build\（可删除或复用）" -ForegroundColor Gray
-Write-Host "  - 建议把 .python_build 和 .venv_build 加入 .gitignore" -ForegroundColor Gray
+Write-Host "`nNotes:" -ForegroundColor Gray
+Write-Host "  - Build venv in .venv_build\ (reuse with -SkipVenv)" -ForegroundColor Gray
+Write-Host "  - Add .venv_build/ and build_output/ to .gitignore" -ForegroundColor Gray
