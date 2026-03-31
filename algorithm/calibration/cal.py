@@ -61,7 +61,7 @@ class Calibration:
                 return None
         return [(x[0], x[1]) for x in circles]
 
-    def load_img(self):
+    def load_img(self, progress_callback=None):
         """加载所有投影，返回观测列表: [(phi, bead_idx, u, v), ...]"""
         if self._observations is not None:
             return self._observations
@@ -82,6 +82,8 @@ class Calibration:
             phi = angle_idx * 2 * np.pi / 360
             for bead_idx, (u, v) in enumerate(points):
                 observations.append((phi, bead_idx, u, v))
+            if progress_callback is not None:
+                progress_callback(angle_idx + 1, 360)
 
         self._observations = observations
         return observations
@@ -266,7 +268,7 @@ class Calibration:
         SDD = SDD * self.dpixel
         return round(SOD, 2), round(SDD, 2), round(u0, 2), round(v0, 2), round(theta, 2)
 
-    def calculate_vshift_package(self):
+    def calculate_vshift_package(self, progress_callback=None):
         """
         两阶段校准，输出完整参数包（含 v-shift）。
 
@@ -279,7 +281,7 @@ class Calibration:
           u0_recon, v0_recon, vc_recon, vs_recon,
           notes
         """
-        observations = self.load_img()
+        observations = self.load_img(progress_callback=progress_callback)
 
         SOD_cal, SDD_cal, u0_cal, v0_cal, theta_cal = self.calculate(observations)
 

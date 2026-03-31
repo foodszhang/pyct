@@ -175,7 +175,7 @@ class ConeBeam:
         else:
             print(f"{full_path} not exists")
 
-    def load_img(self, angle_from_filename: bool = False):
+    def load_img(self, angle_from_filename: bool = False, progress_callback=None):
         if angle_from_filename:
             tif_files = [f for f in os.listdir(self.proj_path) if f.endswith(".tif")]
             parsed = []
@@ -216,9 +216,20 @@ class ConeBeam:
         self.dd_x_recon = self.pixel_size_raw / self.sx
         self.dd_y_recon = self.pixel_size_raw / self.sy
 
+        _counter = [0]
+        _counter_lock = Lock()
+
+        def _on_future_done(fut):
+            with _counter_lock:
+                _counter[0] += 1
+                if progress_callback is not None:
+                    progress_callback(_counter[0], count, "加载投影")
+
         futs = []
         for n, fname in enumerate(filenames):
-            futs.append(self.ThreadPoolExecutor.submit(self.load_img_thread, fname, n))
+            f = self.ThreadPoolExecutor.submit(self.load_img_thread, fname, n)
+            f.add_done_callback(_on_future_done)
+            futs.append(f)
         for fut in futs:
             fut.result()
         self.angles = angles

@@ -1,7 +1,7 @@
 import sys
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtUiTools import QUiLoader
-from threading import Thread
+from PySide6.QtCore import QThread, QObject, Signal
 import subprocess
 import pipe
 import os
@@ -87,6 +87,78 @@ class CTSliceView(QtWidgets.QWidget):
         self.gv.addItem(self.imageItem)
 
 
+class ReconSignals(QObject):
+    progress = Signal(int, str)
+    finished = Signal(object)
+    error = Signal(str)
+
+
+class ReconWorker(QThread):
+    progress = Signal(int, str)
+    finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, params, parent_window):
+        super().__init__()
+        self.params = params
+        self.parent_window = parent_window
+
+    def run(self):
+        p = self.params
+        try:
+            cb = ConeBeam(
+                SOD=p["SOD"],
+                TN=p["TN"],
+                TM=p["TM"],
+                SDD=p["SDD"],
+                NX=p["NX"],
+                NY=p["NY"],
+                NZ=p["NZ"],
+                dd_row=p["dd_row"],
+                dd_column=p["dd_column"],
+                voxel_size=p["voxel_size"],
+                number_of_img=360,
+                proj_path=p["proj_path"],
+                detectorX=p["detector_x"],
+                detectorY=p["detector_y"],
+                eta=p["eta"],
+                vc=p["vc"],
+                vs=p["vs"],
+                sx=p["sx"],
+                sy=p["sy"],
+                useHu=False,
+                rescale_slope=p["rescale_slope"],
+                rescale_intercept=p["rescale_intercept"],
+            )
+            if p["use_scan"]:
+                cb.load_from_dict(self.parent_window.scan_window.img_dict)
+            else:
+                self.progress.emit(5, "正在加载投影...")
+                cb.load_img(
+                    angle_from_filename=True,
+                    progress_callback=lambda cur, tot, stage: self.progress.emit(
+                        int(cur / tot * 60), f"加载投影 {cur}/{tot}"
+                    ),
+                )
+            self.progress.emit(65, "构建几何...")
+            self.progress.emit(80, "FDK 重建中...")
+            rec = cb.reconstruct()
+            self.progress.emit(95, "保存结果...")
+            nii_img = nib.Nifti1Image(rec, np.eye(4))
+            try:
+                full_filename = os.path.join(
+                    self.parent_window.project_path, "rec.nii.gz"
+                )
+                nib.save(nii_img, full_filename)
+            except Exception as e:
+                print("!!!!!", e)
+            print("4444recon.shape", rec.shape, rec.dtype)
+            self.progress.emit(100, "完成")
+            self.finished.emit(rec)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class ReconstrcionDialog(QtWidgets.QDialog):
     ReconDone = QtCore.Signal(np.ndarray)
 
@@ -139,6 +211,19 @@ class ReconstrcionDialog(QtWidgets.QDialog):
 
         self.button_box.accepted.connect(self.startReconstruction)
 
+        self.recon_progress_bar = self.ui.findChild(
+            QtWidgets.QProgressBar, "reconProgressBar"
+        )
+        self.recon_stage_label = self.ui.findChild(QtWidgets.QLabel, "reconStageLabel")
+        self.recon_progress_bar.hide()
+        self.recon_stage_label.hide()
+
+        self.eta_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "etaLineEdit")
+        self.vc_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "vcLineEdit")
+        self.vs_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "vsLineEdit")
+        self.sx_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "sxLineEdit")
+        self.sy_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "syLineEdit")
+
         self.init_from_config()
 
     def init_from_config(self):
@@ -161,6 +246,12 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.rotation_line_edit.setText(str(config["rotation"]))
         self.rescale_slope = float(config["rescale_slope"])
         self.rescale_intercept = float(config["rescale_intercept"])
+        calib = Config.get("CalibResult", {})
+        self.eta_line_edit.setText(str(calib.get("eta", "0.0")))
+        self.vc_line_edit.setText(str(calib.get("vc_recon", "0.0")))
+        self.vs_line_edit.setText(str(calib.get("vs_recon", "0.0")))
+        self.sx_line_edit.setText(str(calib.get("sx", "0.5")))
+        self.sy_line_edit.setText(str(calib.get("sy", "0.5")))
 
     def save_config(self):
         config = Config.get("ReconParam", None)
@@ -181,97 +272,81 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         config["detectorY"] = self.detector_y_line_edit.text()
         config["rotation"] = self.rotation_line_edit.text()
         Config["ReconParam"] = config
+        calib = Config.get("CalibResult", {})
+        calib["eta"] = float(self.eta_line_edit.text())
+        calib["vc_recon"] = float(self.vc_line_edit.text())
+        calib["vs_recon"] = float(self.vs_line_edit.text())
+        calib["sx"] = float(self.sx_line_edit.text())
+        calib["sy"] = float(self.sy_line_edit.text())
+        Config["CalibResult"] = calib
         yaml.dump(Config, open(get_config_path(), "w"), Dumper=yaml.Dumper)
 
-    def reconstruct_thread(self):
-        NX = int(self.voxel_size_x_line_edit.text())
-        NY = int(self.voxel_size_y_line_edit.text())
-        NZ = int(self.voxel_size_z_line_edit.text())
-        TM = int(self.column_count_line_edit.text())
-        TN = int(self.row_count_line_edit.text())
-        dd_column = float(self.x_spacing_line_edit.text())
-        dd_row = float(self.y_spacing_line_edit.text())
-        voxel_size = float(self.voxel_pixel_size_line_edit.text())
-        SOD = float(self.sod_line_edit.text())
-        SDD = float(self.sdd_line_edit.text())
-        proj_path = self.parent_window.project_path
-        detector_x = float(self.detector_x_line_edit.text())
-        detector_y = float(self.detector_y_line_edit.text())
+    def startReconstruction(self):
+        params = {
+            "NX": int(self.voxel_size_x_line_edit.text()),
+            "NY": int(self.voxel_size_y_line_edit.text()),
+            "NZ": int(self.voxel_size_z_line_edit.text()),
+            "TM": int(self.column_count_line_edit.text()),
+            "TN": int(self.row_count_line_edit.text()),
+            "dd_column": float(self.x_spacing_line_edit.text()),
+            "dd_row": float(self.y_spacing_line_edit.text()),
+            "voxel_size": float(self.voxel_pixel_size_line_edit.text()),
+            "SOD": float(self.sod_line_edit.text()),
+            "SDD": float(self.sdd_line_edit.text()),
+            "detector_x": float(self.detector_x_line_edit.text()),
+            "detector_y": float(self.detector_y_line_edit.text()),
+            "use_scan": self.use_scan_check_box.isChecked(),
+            "use_ct_hu": self.use_ct_hu.isChecked(),
+            "rescale_slope": self.rescale_slope,
+            "rescale_intercept": self.rescale_intercept,
+            "proj_path": self.parent_window.project_path,
+            "eta": float(self.eta_line_edit.text()),
+            "vc": float(self.vc_line_edit.text()),
+            "vs": float(self.vs_line_edit.text()),
+            "sx": float(self.sx_line_edit.text()),
+            "sy": float(self.sy_line_edit.text()),
+        }
 
-        calib = Config.get("CalibResult", {})
-        eta_val = float(calib.get("eta", 0.0))
-        vc_val = float(calib.get("vc_recon", 0.0))
-        vs_val = float(calib.get("vs_recon", 0.0))
-        sx_val = float(calib.get("sx", 0.5))
-        sy_val = float(calib.get("sy", 0.5))
+        self.parent_window.tab_widget.setEnabled(False)
+        self.recon_progress_bar.show()
+        self.recon_stage_label.show()
+        self.recon_progress_bar.setValue(0)
+        self.recon_stage_label.setText("准备中...")
 
-        if self.use_scan_check_box.isChecked():
-            cb = ConeBeam(
-                SOD=SOD,
-                TN=TN,
-                TM=TM,
-                SDD=SDD,
-                NX=NX,
-                NY=NY,
-                NZ=NZ,
-                dd_row=dd_row,
-                dd_column=dd_column,
-                voxel_size=voxel_size,
-                number_of_img=360,
-                proj_path=proj_path,
-                detectorX=detector_x,
-                detectorY=detector_y,
-                eta=eta_val,
-                vc=vc_val,
-                vs=vs_val,
-                sx=sx_val,
-                sy=sy_val,
-                useHu=False,
-                rescale_slope=self.rescale_slope,
-                rescale_intercept=self.rescale_intercept,
-            )
-            cb.load_from_dict(self.parent_window.scan_window.img_dict)
-        else:
-            cb = ConeBeam(
-                SOD=SOD,
-                TN=TN,
-                TM=TM,
-                SDD=SDD,
-                NX=NX,
-                NY=NY,
-                NZ=NZ,
-                dd_row=dd_row,
-                dd_column=dd_column,
-                voxel_size=voxel_size,
-                number_of_img=360,
-                proj_path=proj_path,
-                detectorX=detector_x,
-                detectorY=detector_y,
-                eta=eta_val,
-                vc=vc_val,
-                vs=vs_val,
-                sx=sx_val,
-                sy=sy_val,
-                useHu=False,
-                rescale_slope=self.rescale_slope,
-                rescale_intercept=self.rescale_intercept,
-            )
-            cb.load_img(angle_from_filename=True)
-        rec = cb.reconstruct()
-        nii_img = nib.Nifti1Image(rec, np.eye(4))
-        nib.save(nii_img, "rec4.nii.gz")
-        try:
-            full_filename = os.path.join(self.parent_window.project_path, "rec.nii.gz")
-            nii_img = nib.Nifti1Image(rec, np.eye(4))
-            nib.save(nii_img, full_filename)
-        except Exception as e:
-            print("!!!!!", e)
-        print("4444recon.shape", rec.shape, rec.dtype)
+        self.recon_worker = ReconWorker(params, self.parent_window)
+        self.recon_worker.progress.connect(self.on_recon_progress)
+        self.recon_worker.finished.connect(self.on_recon_finished)
+        self.recon_worker.error.connect(self.on_recon_error)
+        self.recon_worker.start()
+
+    def on_recon_progress(self, percent, stage_name):
+        self.recon_progress_bar.setValue(percent)
+        self.recon_stage_label.setText(stage_name)
+
+    def on_recon_finished(self, rec):
+        self.recon_progress_bar.setStyleSheet(
+            "QProgressBar::chunk { background-color: #98c379; }"
+        )
+        self.recon_progress_bar.setValue(100)
         self.ReconDone.emit(rec)
         self.parent_window.tab_widget.setEnabled(True)
         self.save_config()
+        QtCore.QTimer.singleShot(
+            2000,
+            lambda: (
+                self.recon_progress_bar.hide(),
+                self.recon_stage_label.hide(),
+                self.recon_progress_bar.setStyleSheet(""),
+            ),
+        )
 
-    def startReconstruction(self):
-        self.parent_window.tab_widget.setEnabled(False)
-        recon_thread = Thread(target=self.reconstruct_thread)
-        recon_thread.start()
+    def on_recon_error(self, msg):
+        self.recon_stage_label.setText(f"重建失败: {msg}")
+        self.parent_window.tab_widget.setEnabled(True)
+        QtCore.QTimer.singleShot(
+            5000,
+            lambda: (
+                self.recon_progress_bar.hide(),
+                self.recon_stage_label.hide(),
+            ),
+        )

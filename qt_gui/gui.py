@@ -2,7 +2,7 @@
 import sys
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtUiTools import QUiLoader
-from threading import Thread
+from PySide6.QtCore import QThread, QObject, Signal
 import subprocess
 import pipe
 import os
@@ -30,6 +30,55 @@ xray_status_code = [
     "X射线无法开启",
     "自检中",
 ]
+
+
+class LogSignal(QObject):
+    message = Signal(str)
+
+
+class StdoutRedirector:
+    def __init__(self, signal, original):
+        self.signal = signal
+        self._original = original
+
+    def write(self, text):
+        if text and text != "\n":
+            self.signal.message.emit(text)
+        if self._original:
+            self._original.write(text)
+
+    def flush(self):
+        if self._original:
+            self._original.flush()
+
+
+class CalibWorker(QThread):
+    progress = Signal(int, int)
+    finished = Signal(dict)
+    error = Signal(str)
+    status = Signal(str)
+
+    def __init__(self, project_path, config):
+        super().__init__()
+        self.project_path = project_path
+        self.config = config
+
+    def run(self):
+        try:
+            c = cal.Calibration(
+                self.project_path,
+                float(self.config["detectorPixelSize"]),
+                int(self.config["BBNumber"]),
+                int(self.config["detectorWidth"]),
+                int(self.config["detectorHeight"]),
+            )
+            self.status.emit("正在加载投影...")
+            result = c.calculate_vshift_package(
+                progress_callback=lambda cur, tot: self.progress.emit(cur, tot)
+            )
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -193,9 +242,74 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cal_sdd_line_edit = self.ui.findChild(
             QtWidgets.QLineEdit, "calSDDLineEdit"
         )
+        self.cal_eta_line_edit = self.ui.findChild(
+            QtWidgets.QLineEdit, "calEtaLineEdit"
+        )
+        self.cal_vc_raw_line_edit = self.ui.findChild(
+            QtWidgets.QLineEdit, "calVcRawLineEdit"
+        )
+        self.cal_vs_raw_line_edit = self.ui.findChild(
+            QtWidgets.QLineEdit, "calVsRawLineEdit"
+        )
+        self.cal_sx_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "calSxLineEdit")
+        self.cal_sy_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "calSyLineEdit")
+        self.cal_u0_recon_line_edit = self.ui.findChild(
+            QtWidgets.QLineEdit, "calU0ReconLineEdit"
+        )
+        self.cal_v0_recon_line_edit = self.ui.findChild(
+            QtWidgets.QLineEdit, "calV0ReconLineEdit"
+        )
+        self.cal_vc_recon_line_edit = self.ui.findChild(
+            QtWidgets.QLineEdit, "calVcReconLineEdit"
+        )
+        self.cal_vs_recon_line_edit = self.ui.findChild(
+            QtWidgets.QLineEdit, "calVsReconLineEdit"
+        )
 
         self.calButton.clicked.connect(self.calibrate)
         self.saveCalButton.clicked.connect(self.save_calibrate_result)
+
+        self.log_text_edit = self.ui.findChild(QtWidgets.QTextEdit, "logTextEdit")
+        self.clear_log_button = self.ui.findChild(
+            QtWidgets.QPushButton, "clearLogButton"
+        )
+        self.auto_scroll_checkbox = self.ui.findChild(
+            QtWidgets.QCheckBox, "autoScrollCheckBox"
+        )
+        self.cal_progress_bar = self.ui.findChild(
+            QtWidgets.QProgressBar, "calProgressBar"
+        )
+        self.cal_status_label = self.ui.findChild(QtWidgets.QLabel, "calStatusLabel")
+
+        self.log_signal = LogSignal()
+        self.log_signal.message.connect(self.append_log)
+        sys.stdout = StdoutRedirector(self.log_signal, sys.__stdout__)
+        sys.stderr = StdoutRedirector(self.log_signal, sys.__stderr__)
+
+        self.clear_log_button.clicked.connect(self.log_text_edit.clear)
+
+        self.cal_progress_bar.hide()
+        self.cal_status_label.hide()
+
+    def append_log(self, text: str):
+        color = "#d4d4d4"
+        if "[Warn]" in text or "WARNING" in text:
+            color = "#e5c07b"
+        elif "[Error]" in text or "ERROR" in text:
+            color = "#e06c75"
+        elif any(tag in text for tag in ["[Env]", "[Config]", "[Geometry]"]):
+            color = "#56b6c2"
+        elif any(tag in text for tag in ["[Reconstruction]", "[CalibResult]"]):
+            color = "#98c379"
+
+        cursor = self.log_text_edit.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        fmt = QtGui.QTextCharFormat()
+        fmt.setForeground(QtGui.QColor(color))
+        cursor.setCharFormat(fmt)
+        cursor.insertText(text)
+        if self.auto_scroll_checkbox.isChecked():
+            self.log_text_edit.moveCursor(QtGui.QTextCursor.MoveOperation.End)
 
     def change_recon_window(self):
         for v in self.ct_slice_view_list:
@@ -321,32 +435,70 @@ class MainWindow(QtWidgets.QMainWindow):
             self.xray_warm_button.setEnabled(False)
 
     def calibrate_thread(self):
+        pass
+
+    def calibrate(self):
         config = Config.get("CalibrationParam", None)
         if not config:
             QtWidgets.QMessageBox.critical(
                 self, "警告", "配置文件错误， 请检查config.yaml文件"
             )
             return
-        c = cal.Calibration(
-            self.project_path,
-            float(config["detectorPixelSize"]),
-            int(config["BBNumber"]),
-            int(config["detectorWidth"]),
-            int(config["detectorHeight"]),
-        )
-        self.cal_result = c.calculate_vshift_package()
-
-        self.cal_sod_line_edit.setText(str(self.cal_result["SOD"]))
-        self.cal_sdd_line_edit.setText(str(self.cal_result["SDD"]))
-        self.cal_detector_x_line_edit.setText(str(self.cal_result["u0_raw"]))
-        self.cal_detector_y_line_edit.setText(str(self.cal_result["v0_raw"]))
-        self.cal_rotation_line_edit.setText("0")
-        self.tab_widget.setEnabled(True)
-
-    def calibrate(self):
         self.tab_widget.setEnabled(False)
-        cal_thread = Thread(target=self.calibrate_thread)
-        cal_thread.start()
+        self.cal_progress_bar.show()
+        self.cal_status_label.show()
+        self.cal_progress_bar.setValue(0)
+        self.cal_status_label.setText("正在校准...")
+
+        self.cal_worker = CalibWorker(self.project_path, config)
+        self.cal_worker.progress.connect(
+            lambda cur, tot: (
+                self.cal_progress_bar.setMaximum(tot),
+                self.cal_progress_bar.setValue(cur),
+            )
+        )
+        self.cal_worker.status.connect(self.cal_status_label.setText)
+        self.cal_worker.finished.connect(self.on_calibrate_finished)
+        self.cal_worker.error.connect(self.on_calibrate_error)
+        self.cal_worker.start()
+
+    def on_calibrate_finished(self, result):
+        self.cal_result = result
+        self.cal_sod_line_edit.setText(str(result["SOD"]))
+        self.cal_sdd_line_edit.setText(str(result["SDD"]))
+        self.cal_detector_x_line_edit.setText(str(result["u0_raw"]))
+        self.cal_detector_y_line_edit.setText(str(result["v0_raw"]))
+        self.cal_rotation_line_edit.setText("0")
+        self.cal_eta_line_edit.setText(f"{result['eta']:.6f}")
+        self.cal_vc_raw_line_edit.setText(f"{result['vc_raw']:.4f}")
+        self.cal_vs_raw_line_edit.setText(f"{result['vs_raw']:.4f}")
+        self.cal_sx_line_edit.setText(str(result["sx"]))
+        self.cal_sy_line_edit.setText(str(result["sy"]))
+        self.cal_u0_recon_line_edit.setText(f"{result['u0_recon']:.4f}")
+        self.cal_v0_recon_line_edit.setText(f"{result['v0_recon']:.4f}")
+        self.cal_vc_recon_line_edit.setText(f"{result['vc_recon']:.4f}")
+        self.cal_vs_recon_line_edit.setText(f"{result['vs_recon']:.4f}")
+        self.cal_progress_bar.setValue(self.cal_progress_bar.maximum())
+        self.cal_status_label.setText("校准完成")
+        self.tab_widget.setEnabled(True)
+        QtCore.QTimer.singleShot(
+            2000,
+            lambda: (
+                self.cal_progress_bar.hide(),
+                self.cal_status_label.hide(),
+            ),
+        )
+
+    def on_calibrate_error(self, msg):
+        self.cal_status_label.setText(f"校准失败: {msg}")
+        self.tab_widget.setEnabled(True)
+        QtCore.QTimer.singleShot(
+            5000,
+            lambda: (
+                self.cal_progress_bar.hide(),
+                self.cal_status_label.hide(),
+            ),
+        )
 
     def save_calibrate_result(self):
         cr = self.cal_result
@@ -355,6 +507,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.reconstruction_dialog.detector_x_line_edit.setText(str(cr["u0_raw"]))
         self.reconstruction_dialog.detector_y_line_edit.setText(str(cr["v0_raw"]))
         self.reconstruction_dialog.rotation_line_edit.setText("0")
+        self.reconstruction_dialog.eta_line_edit.setText(f"{cr['eta']:.6f}")
+        self.reconstruction_dialog.vc_line_edit.setText(f"{cr['vc_recon']:.4f}")
+        self.reconstruction_dialog.vs_line_edit.setText(f"{cr['vs_recon']:.4f}")
+        self.reconstruction_dialog.sx_line_edit.setText(str(cr["sx"]))
+        self.reconstruction_dialog.sy_line_edit.setText(str(cr["sy"]))
 
         calib_for_yaml = {
             "SOD": cr["SOD"],
