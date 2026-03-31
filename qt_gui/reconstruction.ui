@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <ui version="4.0">
  <class>Dialog</class>
  <widget class="QDialog" name="Dialog">
@@ -7,7 +7,7 @@
      <x>0</x>
      <y>0</y>
      <width>564</width>
-     <height>700</height>
+     <height>760</height>
     </rect>
    </property>
   <property name="windowTitle">
@@ -17,13 +17,13 @@
     <property name="geometry">
      <rect>
       <x>20</x>
-      <y>430</y>
+      <y>530</y>
       <width>521</width>
       <height>16</height>
      </rect>
     </property>
     <property name="text">
-     <string></string>
+     <string />
     </property>
     <property name="alignment">
      <set>Qt::AlignCenter</set>
@@ -33,7 +33,7 @@
     <property name="geometry">
      <rect>
       <x>20</x>
-      <y>450</y>
+      <y>550</y>
       <width>521</width>
       <height>23</height>
      </rect>
@@ -49,7 +49,7 @@
     <property name="geometry">
      <rect>
       <x>120</x>
-      <y>610</y>
+      <y>710</y>
       <width>341</width>
       <height>32</height>
      </rect>
@@ -377,7 +377,7 @@
     <property name="geometry">
      <rect>
       <x>20</x>
-      <y>360</y>
+      <y>460</y>
       <width>521</width>
       <height>80</height>
      </rect>
@@ -520,7 +520,7 @@
     <property name="geometry">
      <rect>
       <x>20</x>
-      <y>545</y>
+      <y>645</y>
       <width>391</width>
       <height>21</height>
      </rect>
@@ -536,7 +536,7 @@
     <property name="geometry">
      <rect>
       <x>20</x>
-      <y>575</y>
+      <y>675</y>
       <width>391</width>
       <height>21</height>
      </rect>
@@ -549,7 +549,7 @@
     <property name="geometry">
      <rect>
       <x>170</x>
-      <y>480</y>
+      <y>580</y>
       <width>113</width>
       <height>21</height>
      </rect>
@@ -562,7 +562,7 @@
     <property name="geometry">
      <rect>
       <x>20</x>
-      <y>480</y>
+      <y>580</y>
       <width>111</width>
       <height>16</height>
      </rect>
@@ -575,7 +575,7 @@
     <property name="geometry">
      <rect>
       <x>20</x>
-      <y>510</y>
+      <y>610</y>
       <width>111</width>
       <height>16</height>
      </rect>
@@ -588,7 +588,7 @@
     <property name="geometry">
      <rect>
       <x>170</x>
-      <y>510</y>
+      <y>610</y>
       <width>113</width>
       <height>21</height>
      </rect>
@@ -598,7 +598,7 @@
     </property>
    </widget>
   </widget>
- <resources/>
+ <resources />
  <connections>
   <connection>
    <sender>buttonBox</sender>

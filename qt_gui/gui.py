@@ -89,6 +89,9 @@ class MainWindow(QtWidgets.QMainWindow):
         loader.registerCustomWidget(rec.CTSliceView)
         loader.registerCustomWidget(pg.GraphicsView)
         self.ui = loader.load(get_ui_path("main.ui"), None)
+        self.mainSplitter = self.ui.findChild(QtWidgets.QSplitter, "mainSplitter")
+        if self.mainSplitter:
+            self.mainSplitter.setSizes([1100, 150])
         # 选择项目目录
 
         self.project_path = None
