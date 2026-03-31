@@ -11,7 +11,6 @@ import pyqtgraph as pg
 from algorithm.astra.conebeam import ConeBeam
 from typing import Optional
 import yaml
-import numba as nb
 import nibabel as nib
 from utils.paths import get_config_path, get_ui_path
 

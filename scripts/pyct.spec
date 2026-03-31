@@ -46,24 +46,10 @@ try:
 except ImportError:
     print("[spec] WARNING: astra not found, CUDA reconstruction will not work in packaged app")
 
-# ---- Collect numba/llvmlite (if present) ----
-numba_binaries = []
-try:
-    import llvmlite
-    llvm_dir = os.path.dirname(llvmlite.__file__)
-    for root, dirs, files in os.walk(llvm_dir):
-        rel = os.path.relpath(root, os.path.dirname(llvm_dir))
-        for f in files:
-            if f.endswith(('.pyd', '.dll', '.so')):
-                numba_binaries.append((os.path.join(root, f), rel))
-    print(f"[spec] Collected {len(numba_binaries)} llvmlite binaries")
-except ImportError:
-    pass
-
 a = Analysis(
     [os.path.join(repo_root, 'pyct_app.py')],
     pathex=[repo_root],
-    binaries=astra_binaries + numba_binaries,
+    binaries=astra_binaries,
     datas=data_files + astra_datas,
     hiddenimports=[
         'astra',
@@ -86,7 +72,6 @@ a = Analysis(
         'scipy.optimize._lsq',
         'scipy.optimize._lsq.least_squares',
         'scipy.ndimage',
-        'numba',
         'cv2',
         'nibabel',
         'pyqtgraph',
