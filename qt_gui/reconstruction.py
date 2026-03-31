@@ -21,14 +21,21 @@ Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 class CTSliceView(QtWidgets.QWidget):
     def __init__(self, parent=None, window_sliders=None):
         super().__init__(parent)
-        loader.registerCustomWidget(pg.GraphicsView)
-        self.ui = loader.load(get_ui_path("ctSlice.ui"), self)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.ui)
-        self.gv = self.ui.findChild(pg.GraphicsView, "ImageView")
-        self.slider = self.ui.findChild(QtWidgets.QSlider, "SliceSlider")
-        self.slider.valueChanged.connect(self.slider_value_changed)
+        layout.setSpacing(0)
+
+        self.gv = pg.GraphicsView(self)
+        self.gv.setMinimumSize(420, 420)
+        layout.addWidget(self.gv, 1)
+
+        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self)
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(0)
+        layout.addWidget(self.slider)
+
+        self.slider.valueChanged.connect(self._on_slider_changed)
+
         self.axis = None
         self.img = None
         self.max_window = None
@@ -36,15 +43,15 @@ class CTSliceView(QtWidgets.QWidget):
         self.imageItem = None
         self.slider_value = 0
 
-    def _get_slice(self, value):
+    def _get_slice(self, idx):
         if self.img is None:
             return None
         if self.axis == 0:
-            s = self.img[:, :, value]
+            s = self.img[:, :, idx]
         elif self.axis == 1:
-            s = self.img[value, :, :]
+            s = self.img[idx, :, :]
         elif self.axis == 2:
-            s = self.img[:, value, :]
+            s = self.img[:, idx, :]
         else:
             return None
         if self.min_window is not None and self.max_window is not None:
@@ -61,28 +68,6 @@ class CTSliceView(QtWidgets.QWidget):
         elif self.axis == 2:
             return self.img.shape[1]
         return 0
-
-    def change_window(self):
-        self._update_display(self.slider.value())
-
-    def set_window_high(self, value):
-        self.max_window = value
-
-    def set_window_low(self, value):
-        self.min_window = value
-
-    def slider_value_changed(self, value):
-        self._update_display(value)
-
-    def show_img(self, img, axis, value=0):
-        self.img = img
-        self.axis = axis
-        size = self._axis_size()
-        self.slider.blockSignals(True)
-        self.slider.setMaximum(max(size - 1, 0))
-        self.slider.setValue(min(value, max(size - 1, 0)))
-        self.slider.blockSignals(False)
-        self._update_display(self.slider.value())
 
     def _update_display(self, slider_value):
         if self.img is None:
@@ -102,6 +87,28 @@ class CTSliceView(QtWidgets.QWidget):
         else:
             self.imageItem.setImage(s.T, autoLevels=True)
             self.imageItem.setRect(rect)
+
+    def _on_slider_changed(self, value):
+        self._update_display(value)
+
+    def show_img(self, img, axis, value=0):
+        self.img = img
+        self.axis = axis
+        size = self._axis_size()
+        self.slider.blockSignals(True)
+        self.slider.setMaximum(max(size - 1, 0))
+        self.slider.setValue(min(value, max(size - 1, 0)))
+        self.slider.blockSignals(False)
+        self._update_display(self.slider.value())
+
+    def change_window(self):
+        self._update_display(self.slider.value())
+
+    def set_window_high(self, value):
+        self.max_window = value
+
+    def set_window_low(self, value):
+        self.min_window = value
 
 
 class ReconSignals(QObject):
