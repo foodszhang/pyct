@@ -129,6 +129,7 @@ class ReconWorker(QThread):
                 useHu=False,
                 rescale_slope=p["rescale_slope"],
                 rescale_intercept=p["rescale_intercept"],
+                pixel_size_raw=p["pixel_size_raw"],
             )
             if p["use_scan"]:
                 cb.load_from_dict(self.parent_window.scan_window.img_dict)
@@ -247,11 +248,20 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.rescale_slope = float(config["rescale_slope"])
         self.rescale_intercept = float(config["rescale_intercept"])
         calib = Config.get("CalibResult", {})
+        cal_config = Config.get("CalibrationParam", {})
         self.eta_line_edit.setText(str(calib.get("eta", "0.0")))
         self.vc_line_edit.setText(str(calib.get("vc_recon", "0.0")))
         self.vs_line_edit.setText(str(calib.get("vs_recon", "0.0")))
         self.sx_line_edit.setText(str(calib.get("sx", "0.5")))
         self.sy_line_edit.setText(str(calib.get("sy", "0.5")))
+
+        if calib and cal_config:
+            sx = float(calib.get("sx", 0.5))
+            sy = float(calib.get("sy", 0.5))
+            raw_w = int(cal_config.get("detectorWidth", 1536))
+            raw_h = int(cal_config.get("detectorHeight", 1944))
+            self.column_count_line_edit.setText(str(int(raw_w * sx)))
+            self.row_count_line_edit.setText(str(int(raw_h * sy)))
 
     def save_config(self):
         config = Config.get("ReconParam", None)
@@ -305,6 +315,9 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             "vs": float(self.vs_line_edit.text()),
             "sx": float(self.sx_line_edit.text()),
             "sy": float(self.sy_line_edit.text()),
+            "pixel_size_raw": float(
+                Config.get("CalibrationParam", {}).get("detectorPixelSize", 0.0748)
+            ),
         }
 
         self.parent_window.tab_widget.setEnabled(False)

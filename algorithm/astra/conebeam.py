@@ -91,6 +91,22 @@ class ConeBeam:
         angles = list(img_dict.keys())
         perAngle = 2 * np.pi / self.number_of_img
         angles = [i * perAngle for i in angles]
+
+        if self.w > 0:
+            expected_tn = int(self.w * self.sx) if self.w > 0 else self.TN
+            expected_tm = int(self.h * self.sy) if self.h > 0 else self.TM
+            if abs(self.TN - expected_tn) > 2 or abs(self.TM - expected_tm) > 2:
+                print(f"[Warn] TN/TM 与探测器尺寸*sx/sy 不匹配!")
+                print(f"[Warn]   原始图像: {self.w}x{self.h}")
+                print(f"[Warn]   当前 TN={self.TN}, TM={self.TM}")
+                print(f"[Warn]   期望 TN={expected_tn}, TM={expected_tm} (raw * sx/sy)")
+                print(f"[Warn]   这会导致重建几何不正确!")
+
+        if self.detectorX_recon > self.TN or self.detectorY_recon > self.TM:
+            print(f"[Warn] 探测器中心超出图像范围!")
+            print(f"[Warn]   u0_recon={self.detectorX_recon}, TN={self.TN}")
+            print(f"[Warn]   v0_recon={self.detectorY_recon}, TM={self.TM}")
+
         vectors = self.build_cone_vec(
             angles,
             self.SOD,
@@ -233,6 +249,21 @@ class ConeBeam:
         for fut in futs:
             fut.result()
         self.angles = angles
+
+        if self.w > 0:
+            expected_tn = int(self.w * self.sx) if self.w > 0 else self.TN
+            expected_tm = int(self.h * self.sy) if self.h > 0 else self.TM
+            if abs(self.TN - expected_tn) > 2 or abs(self.TM - expected_tm) > 2:
+                print(f"[Warn] TN/TM 与探测器尺寸*sx/sy 不匹配!")
+                print(f"[Warn]   原始图像: {self.w}x{self.h}")
+                print(f"[Warn]   当前 TN={self.TN}, TM={self.TM}")
+                print(f"[Warn]   期望 TN={expected_tn}, TM={expected_tm} (raw * sx/sy)")
+                print(f"[Warn]   这会导致重建几何不正确!")
+
+        if self.detectorX_recon > self.TN or self.detectorY_recon > self.TM:
+            print(f"[Warn] 探测器中心超出图像范围!")
+            print(f"[Warn]   u0_recon={self.detectorX_recon}, TN={self.TN}")
+            print(f"[Warn]   v0_recon={self.detectorY_recon}, TM={self.TM}")
 
         vectors = self.build_cone_vec(
             self.angles,

@@ -496,6 +496,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.reconstruction_dialog.sx_line_edit.setText(str(cr["sx"]))
         self.reconstruction_dialog.sy_line_edit.setText(str(cr["sy"]))
 
+        cal_config = Config.get("CalibrationParam", {})
+        raw_w = int(cal_config.get("detectorWidth", 1536))
+        raw_h = int(cal_config.get("detectorHeight", 1944))
+        recon_tn = int(raw_w * cr["sx"])
+        recon_tm = int(raw_h * cr["sy"])
+        self.reconstruction_dialog.column_count_line_edit.setText(str(recon_tn))
+        self.reconstruction_dialog.row_count_line_edit.setText(str(recon_tm))
+
+        pixel_size = float(cal_config.get("detectorPixelSize", 0.0748))
+        self.reconstruction_dialog.x_spacing_line_edit.setText(str(pixel_size))
+        self.reconstruction_dialog.y_spacing_line_edit.setText(str(pixel_size))
+
         calib_for_yaml = {
             "SOD": cr["SOD"],
             "SDD": cr["SDD"],
@@ -512,6 +524,12 @@ class MainWindow(QtWidgets.QMainWindow):
             "vs_recon": cr["vs_recon"],
         }
         Config["CalibResult"] = calib_for_yaml
+        recon_config = Config.get("ReconParam", {})
+        recon_config["columnCount"] = recon_tn
+        recon_config["rowCount"] = recon_tm
+        recon_config["xSpacing"] = pixel_size
+        recon_config["ySpacing"] = pixel_size
+        Config["ReconParam"] = recon_config
         yaml.dump(Config, open(get_config_path(), "w"), Dumper=yaml.Dumper)
 
         self.reconstruction_dialog.save_config()

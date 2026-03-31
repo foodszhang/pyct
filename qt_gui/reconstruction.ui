@@ -152,19 +152,19 @@
     <string>图像横轴像素个数</string>
    </property>
   </widget>
-  <widget class="QLineEdit" name="columnCountLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>90</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>512</string>
-   </property>
-  </widget>
+   <widget class="QLineEdit" name="columnCountLineEdit">
+    <property name="geometry">
+     <rect>
+      <x>170</x>
+      <y>90</y>
+      <width>113</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>768</string>
+    </property>
+   </widget>
   <widget class="QLabel" name="label_5">
    <property name="geometry">
     <rect>
@@ -178,19 +178,19 @@
     <string>图像纵轴像素个数</string>
    </property>
   </widget>
-  <widget class="QLineEdit" name="rowCountLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>120</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>512</string>
-   </property>
-  </widget>
+   <widget class="QLineEdit" name="rowCountLineEdit">
+    <property name="geometry">
+     <rect>
+      <x>170</x>
+      <y>120</y>
+      <width>113</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>972</string>
+    </property>
+   </widget>
   <widget class="QLabel" name="label_6">
    <property name="geometry">
     <rect>
@@ -217,32 +217,32 @@
     <string>图像纵轴像素间距(mm)</string>
    </property>
   </widget>
-  <widget class="QLineEdit" name="xSpacingLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>150</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>0.2244</string>
-   </property>
-  </widget>
-  <widget class="QLineEdit" name="ySpacingLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>180</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>0.2840</string>
-   </property>
-  </widget>
+   <widget class="QLineEdit" name="xSpacingLineEdit">
+    <property name="geometry">
+     <rect>
+      <x>170</x>
+      <y>150</y>
+      <width>113</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>0.0748</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="ySpacingLineEdit">
+    <property name="geometry">
+     <rect>
+      <x>170</x>
+      <y>180</y>
+      <width>113</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>0.0748</string>
+    </property>
+   </widget>
   <widget class="QLabel" name="label_8">
    <property name="geometry">
     <rect>
@@ -282,19 +282,19 @@
     <string>体素像素间距(mm)</string>
    </property>
   </widget>
-  <widget class="QLineEdit" name="voxelPixelSizeLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>240</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>0.22</string>
-   </property>
-   </widget>
+   <widget class="QLineEdit" name="voxelPixelSizeLineEdit">
+    <property name="geometry">
+     <rect>
+      <x>170</x>
+      <y>240</y>
+      <width>113</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>0.25</string>
+    </property>
+    </widget>
    <widget class="QLabel" name="label_10">
    <property name="geometry">
     <rect>
