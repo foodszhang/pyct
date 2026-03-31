@@ -329,7 +329,6 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         )
         self.recon_progress_bar.setValue(100)
         self.ReconDone.emit(rec)
-        self.parent_window.tab_widget.setEnabled(True)
         self.save_config()
         QtCore.QTimer.singleShot(
             2000,

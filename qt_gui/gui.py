@@ -73,12 +73,16 @@ class CalibWorker(QThread):
                 int(self.config["detectorHeight"]),
             )
             self.status.emit("正在加载投影...")
-            result = c.calculate_vshift_package(
-                progress_callback=lambda cur, tot: self.progress.emit(cur, tot)
-            )
+            result = c.calculate_vshift_package(progress_callback=self._on_progress)
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
+
+    def _on_progress(self, cur, tot):
+        self.progress.emit(cur, tot)
+        if cur == tot:
+            self.status.emit("投影加载完成，正在优化几何参数...")
+            self.progress.emit(0, 0)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -405,7 +409,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.xray_reconnect_button.setEnabled(True)
             if self.xray_refresh_timer.isActive():
                 self.xray_refresh_timer.stop()
-        self.xray_reconnect_button.setEnabled(False)
+            return
 
         status = self.xray_controller.query_all()
         if not status:
@@ -440,6 +444,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def calibrate_thread(self):
         pass
 
+    def _update_cal_progress(self, cur, tot):
+        if tot == 0:
+            self.cal_progress_bar.setMaximum(0)
+        else:
+            self.cal_progress_bar.setMaximum(tot)
+            self.cal_progress_bar.setValue(cur)
+
     def calibrate(self):
         config = Config.get("CalibrationParam", None)
         if not config:
@@ -454,12 +465,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cal_status_label.setText("正在校准...")
 
         self.cal_worker = CalibWorker(self.project_path, config)
-        self.cal_worker.progress.connect(
-            lambda cur, tot: (
-                self.cal_progress_bar.setMaximum(tot),
-                self.cal_progress_bar.setValue(cur),
-            )
-        )
+        self.cal_worker.progress.connect(self._update_cal_progress)
         self.cal_worker.status.connect(self.cal_status_label.setText)
         self.cal_worker.finished.connect(self.on_calibrate_finished)
         self.cal_worker.error.connect(self.on_calibrate_error)
@@ -481,26 +487,28 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cal_v0_recon_line_edit.setText(f"{result['v0_recon']:.4f}")
         self.cal_vc_recon_line_edit.setText(f"{result['vc_recon']:.4f}")
         self.cal_vs_recon_line_edit.setText(f"{result['vs_recon']:.4f}")
-        self.cal_progress_bar.setValue(self.cal_progress_bar.maximum())
-        self.cal_status_label.setText("校准完成")
+        self.cal_progress_bar.setMaximum(100)
+        self.cal_progress_bar.setValue(100)
+        self.cal_status_label.setText("校准完成 ✓")
+        self.cal_status_label.setStyleSheet("color: green; font-weight: bold;")
         self.tab_widget.setEnabled(True)
         QtCore.QTimer.singleShot(
-            2000,
+            3000,
             lambda: (
                 self.cal_progress_bar.hide(),
                 self.cal_status_label.hide(),
+                self.cal_status_label.setStyleSheet(""),
             ),
         )
 
     def on_calibrate_error(self, msg):
-        self.cal_status_label.setText(f"校准失败: {msg}")
+        self.cal_progress_bar.hide()
+        self.cal_status_label.hide()
         self.tab_widget.setEnabled(True)
-        QtCore.QTimer.singleShot(
-            5000,
-            lambda: (
-                self.cal_progress_bar.hide(),
-                self.cal_status_label.hide(),
-            ),
+        QtWidgets.QMessageBox.warning(
+            self.ui,
+            "校准失败",
+            f"校准过程中出现错误：\n\n{msg}\n\n请检查投影数据和校准参数。",
         )
 
     def save_calibrate_result(self):
@@ -542,6 +550,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.ct_scan_progress_label.setText(text)
 
     def show_reconstruction_result(self, img: np.ndarray):
+        self.tab_widget.setEnabled(True)
         max_value = np.max(img)
         min_value = np.min(img)
         self.recon_max_value = max_value

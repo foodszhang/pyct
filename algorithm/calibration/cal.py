@@ -424,10 +424,10 @@ def joint_optimize(
     ub = np.zeros(n_params)
     lb[0] = -0.1
     ub[0] = 0.1
-    lb[1] = 800.0
-    ub[1] = 1100.0
-    lb[2] = 800.0
-    ub[2] = 1200.0
+    lb[1] = max(100.0, SOD_init * 0.5)
+    ub[1] = SOD_init * 1.5
+    lb[2] = max(100.0, SDD_init * 0.5)
+    ub[2] = SDD_init * 1.5
     lb[3] = -30.0
     ub[3] = 30.0
     lb[4] = -30.0
@@ -456,6 +456,8 @@ def joint_optimize(
                 res.append(0.0)
                 res.append(0.0)
         return np.array(res)
+
+    x0 = np.clip(x0, lb, ub)
 
     result = least_squares(
         residuals,
