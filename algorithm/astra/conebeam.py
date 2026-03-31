@@ -34,6 +34,9 @@ class ConeBeam:
         eta: float = 0.0,
         vc: float = 0.0,
         vs: float = 0.0,
+        vol_center_x: float = 0.0,
+        vol_center_y: float = 0.0,
+        vol_center_z: float = 0.0,
     ):
         self.SOD = SOD
         self.SDD = SDD
@@ -52,7 +55,23 @@ class ConeBeam:
         self.number_of_img = number_of_img
         self.detectorX_raw = detectorX
         self.detectorY_raw = detectorY
-        self.vol_geom = ast.create_vol_geom(NX, NY, NZ)
+        self.vol_center_x = vol_center_x
+        self.vol_center_y = vol_center_y
+        self.vol_center_z = vol_center_z
+        xc = self.vol_center_x / self.voxel_size
+        yc = self.vol_center_y / self.voxel_size
+        zc = self.vol_center_z / self.voxel_size
+        self.vol_geom = ast.create_vol_geom(
+            NX,
+            NY,
+            NZ,
+            -NY / 2.0 + xc,
+            NY / 2.0 + xc,
+            -NX / 2.0 + yc,
+            NX / 2.0 + yc,
+            -NZ / 2.0 + zc,
+            NZ / 2.0 + zc,
+        )
         self.rec_id = ast.data3d.create("-vol", self.vol_geom)
         self.ThreadPoolExecutor = ThreadPoolExecutor(max_workers=20)
         self.w = 0
@@ -66,6 +85,9 @@ class ConeBeam:
         self.vc = vc
         self.vs = vs
         print(f"[Geometry] eta = {self.eta}, vc = {self.vc}, vs = {self.vs}")
+        print(
+            f"[Geometry] vol_center = ({self.vol_center_x}, {self.vol_center_y}, {self.vol_center_z}) mm"
+        )
 
     def load_from_dict(self, img_dict):
         self.data = np.zeros((self.TM, len(img_dict), self.TN), dtype=np.float32)
@@ -373,6 +395,9 @@ if __name__ == "__main__":
         useHu=False,
         rescale_slope=1.0,
         rescale_intercept=0.0,
+        vol_center_x=0.0,
+        vol_center_y=0.0,
+        vol_center_z=0.0,
     )
     cb.load_img(angle_from_filename=True)
     rec = cb.reconstruct()

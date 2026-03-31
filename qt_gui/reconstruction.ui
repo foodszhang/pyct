@@ -597,6 +597,84 @@
      <string>512</string>
     </property>
    </widget>
+   <widget class="QLabel" name="labelRoiCenterX">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>640</y>
+      <width>80</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>ROI 中心 X (mm)</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="roiCenterXLineEdit">
+    <property name="geometry">
+     <rect>
+      <x>170</x>
+      <y>638</y>
+      <width>113</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>0.0</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="labelRoiCenterY">
+    <property name="geometry">
+     <rect>
+      <x>300</x>
+      <y>640</y>
+      <width>80</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>ROI 中心 Y (mm)</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="roiCenterYLineEdit">
+    <property name="geometry">
+     <rect>
+      <x>385</x>
+      <y>638</y>
+      <width>113</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>0.0</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="labelRoiCenterZ">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>665</y>
+      <width>80</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>ROI 中心 Z (mm)</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="roiCenterZLineEdit">
+    <property name="geometry">
+     <rect>
+      <x>170</x>
+      <y>663</y>
+      <width>113</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>0.0</string>
+    </property>
+   </widget>
   </widget>
  <resources />
  <connections>

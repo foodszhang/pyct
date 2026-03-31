@@ -54,8 +54,6 @@ class CTSliceView(QtWidgets.QWidget):
             s = self.img[:, idx, :]
         else:
             return None
-        if self.min_window is not None and self.max_window is not None:
-            s = np.clip(s, self.min_window, self.max_window)
         return s
 
     def _axis_size(self):
@@ -81,11 +79,25 @@ class CTSliceView(QtWidgets.QWidget):
         if s is None:
             return
         rect = QtCore.QRectF(0, 0, self.gv.size().width(), self.gv.size().height())
+        use_global = self.min_window is not None and self.max_window is not None
         if self.imageItem is None:
-            self.imageItem = pg.ImageItem(s.T, autoLevels=True, rect=rect)
+            if use_global:
+                self.imageItem = pg.ImageItem(
+                    s.T,
+                    autoLevels=False,
+                    levels=(self.min_window, self.max_window),
+                    rect=rect,
+                )
+            else:
+                self.imageItem = pg.ImageItem(s.T, autoLevels=True, rect=rect)
             self.gv.addItem(self.imageItem)
         else:
-            self.imageItem.setImage(s.T, autoLevels=True)
+            if use_global:
+                self.imageItem.setImage(
+                    s.T, autoLevels=False, levels=(self.min_window, self.max_window)
+                )
+            else:
+                self.imageItem.setImage(s.T, autoLevels=True)
             self.imageItem.setRect(rect)
 
     def _on_slider_changed(self, value):
@@ -154,6 +166,9 @@ class ReconWorker(QThread):
                 rescale_slope=p["rescale_slope"],
                 rescale_intercept=p["rescale_intercept"],
                 pixel_size_raw=p["pixel_size_raw"],
+                vol_center_x=p["vol_center_x"],
+                vol_center_y=p["vol_center_y"],
+                vol_center_z=p["vol_center_z"],
             )
             if p["use_scan"]:
                 cb.load_from_dict(self.parent_window.scan_window.img_dict)
@@ -248,6 +263,15 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.vs_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "vsLineEdit")
         self.sx_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "sxLineEdit")
         self.sy_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "syLineEdit")
+        self.roi_center_x_line_edit = self.ui.findChild(
+            QtWidgets.QLineEdit, "roiCenterXLineEdit"
+        )
+        self.roi_center_y_line_edit = self.ui.findChild(
+            QtWidgets.QLineEdit, "roiCenterYLineEdit"
+        )
+        self.roi_center_z_line_edit = self.ui.findChild(
+            QtWidgets.QLineEdit, "roiCenterZLineEdit"
+        )
 
         self.init_from_config()
 
@@ -287,6 +311,10 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             self.column_count_line_edit.setText(str(int(raw_w * sx)))
             self.row_count_line_edit.setText(str(int(raw_h * sy)))
 
+        self.roi_center_x_line_edit.setText(str(config.get("roiCenterX", "0.0")))
+        self.roi_center_y_line_edit.setText(str(config.get("roiCenterY", "0.0")))
+        self.roi_center_z_line_edit.setText(str(config.get("roiCenterZ", "0.0")))
+
     def save_config(self):
         config = Config.get("ReconParam", None)
         if not config:
@@ -305,6 +333,9 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         config["detectorX"] = self.detector_x_line_edit.text()
         config["detectorY"] = self.detector_y_line_edit.text()
         config["rotation"] = self.rotation_line_edit.text()
+        config["roiCenterX"] = self.roi_center_x_line_edit.text()
+        config["roiCenterY"] = self.roi_center_y_line_edit.text()
+        config["roiCenterZ"] = self.roi_center_z_line_edit.text()
         Config["ReconParam"] = config
         calib = Config.get("CalibResult", {})
         calib["eta"] = float(self.eta_line_edit.text())
@@ -342,6 +373,9 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             "pixel_size_raw": float(
                 Config.get("CalibrationParam", {}).get("detectorPixelSize", 0.0748)
             ),
+            "vol_center_x": float(self.roi_center_x_line_edit.text()),
+            "vol_center_y": float(self.roi_center_y_line_edit.text()),
+            "vol_center_z": float(self.roi_center_z_line_edit.text()),
         }
 
         self.parent_window.tab_widget.setEnabled(False)
