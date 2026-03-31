@@ -3,4 +3,8 @@ pyyaml
 opencv-python
 pyside6
 pyqtgraph
-
+nibabel
+pandas
+requests
+scikit-image
+numpy
