@@ -545,24 +545,31 @@ class MainWindow(QtWidgets.QMainWindow):
         min_value = np.min(img)
         self.recon_max_value = max_value
         self.recon_min_value = min_value
+
+        self.recon_window_high_spin_box.blockSignals(True)
+        self.recon_window_low_spin_box.blockSignals(True)
+
         self.recon_window_high_spin_box.setMaximum(max_value)
         self.recon_window_high_spin_box.setMinimum(min_value)
         self.recon_window_low_spin_box.setMaximum(max_value)
         self.recon_window_low_spin_box.setMinimum(min_value)
 
-        self.recon_window_high_spin_box.setValue(max_value)
-        self.recon_window_low_spin_box.setValue(min_value)
         if self.reconstruction_dialog.use_ct_hu.isChecked():
-            self.recon_window_high_spin_box.setValue(3000)
-            self.recon_window_low_spin_box.setValue(-1000)
+            high_val = 3000
+            low_val = -1000
+        else:
+            high_val = max_value
+            low_val = min_value
+
+        self.recon_window_high_spin_box.setValue(high_val)
+        self.recon_window_low_spin_box.setValue(low_val)
+
+        self.recon_window_high_spin_box.blockSignals(False)
+        self.recon_window_low_spin_box.blockSignals(False)
 
         for i in range(3):
-            if self.reconstruction_dialog.use_ct_hu.isChecked():
-                self.ct_slice_view_list[i].min_window = -1000
-                self.ct_slice_view_list[i].max_window = 3000
-            else:
-                self.ct_slice_view_list[i].min_window = min_value
-                self.ct_slice_view_list[i].max_window = max_value
+            self.ct_slice_view_list[i].min_window = low_val
+            self.ct_slice_view_list[i].max_window = high_val
             self.ct_slice_view_list[i].show_img(img, i)
 
     def start_reconstruction(self):

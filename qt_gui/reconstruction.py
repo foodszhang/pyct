@@ -32,59 +32,73 @@ class CTSliceView(QtWidgets.QWidget):
         self.min_window = None
         self.imageItem = None
         self.slider_value = 0
-        # self.gv.setRange(QtCore.QRectF(0, 0, 512, 512))
+
+    def _get_slice(self, value):
+        if self.img is None:
+            return None
+        if self.axis == 0:
+            s = self.img[:, :, value]
+        elif self.axis == 1:
+            s = self.img[value, :, :]
+        elif self.axis == 2:
+            s = self.img[:, value, :]
+        else:
+            return None
+        if self.min_window is not None and self.max_window is not None:
+            s = np.clip(s, self.min_window, self.max_window)
+        return s
+
+    def _axis_size(self):
+        if self.img is None:
+            return 0
+        if self.axis == 0:
+            return self.img.shape[2]
+        elif self.axis == 1:
+            return self.img.shape[0]
+        elif self.axis == 2:
+            return self.img.shape[1]
+        return 0
 
     def change_window(self):
-        self.show_img(self.img, self.axis, self.slider_value)
+        self._update_display(self.slider.value())
 
     def set_window_high(self, value):
-        if not self.imageItem:
-            return
         self.max_window = value
 
     def set_window_low(self, value):
-        if not self.imageItem:
-            return
         self.min_window = value
 
     def slider_value_changed(self, value):
-        if self.img is None:
-            return
-        self.show_img(self.img, self.axis, value)
+        self._update_display(value)
 
     def show_img(self, img, axis, value=0):
         self.img = img
-        part_img = img.clip(self.min_window, self.max_window)
-        if self.axis is None:
-            self.axis = axis
-        if axis == 0:
-            value = int(value * part_img.shape[2] / 512)
-            self.imageItem = pg.ImageItem(
-                part_img[:, :, value].T,
-                autoLevels=True,
-                rect=QtCore.QRectF(
-                    0, 0, self.gv.size().width(), self.gv.size().height()
-                ),
-            )
-        elif axis == 1:
-            value = int(value * part_img.shape[0] / 512)
-            self.imageItem = pg.ImageItem(
-                part_img[value, :, :].T,
-                autoLevels=True,
-                rect=QtCore.QRectF(
-                    0, 0, self.gv.size().width(), self.gv.size().height()
-                ),
-            )
-        elif axis == 2:
-            value = int(value * part_img.shape[1] / 512)
-            self.imageItem = pg.ImageItem(
-                part_img[:, value, :].T,
-                autoLevels=True,
-                rect=QtCore.QRectF(
-                    0, 0, self.gv.size().width(), self.gv.size().height()
-                ),
-            )
-        self.gv.addItem(self.imageItem)
+        self.axis = axis
+        size = self._axis_size()
+        self.slider.blockSignals(True)
+        self.slider.setMaximum(max(size - 1, 0))
+        self.slider.setValue(min(value, max(size - 1, 0)))
+        self.slider.blockSignals(False)
+        self._update_display(self.slider.value())
+
+    def _update_display(self, slider_value):
+        if self.img is None:
+            return
+        size = self._axis_size()
+        if size == 0:
+            return
+        idx = max(0, min(slider_value, size - 1))
+        self.slider_value = idx
+        s = self._get_slice(idx)
+        if s is None:
+            return
+        rect = QtCore.QRectF(0, 0, self.gv.size().width(), self.gv.size().height())
+        if self.imageItem is None:
+            self.imageItem = pg.ImageItem(s.T, autoLevels=True, rect=rect)
+            self.gv.addItem(self.imageItem)
+        else:
+            self.imageItem.setImage(s.T, autoLevels=True)
+            self.imageItem.setRect(rect)
 
 
 class ReconSignals(QObject):
