@@ -353,49 +353,11 @@
          <height>23</height>
         </rect>
        </property>
-       <property name="text">
-        <string>开始重建</string>
-       </property>
-      </widget>
-      <widget class="QSlider" name="reconWindowLowSlider">
-       <property name="enabled">
-        <bool>false</bool>
-       </property>
-       <property name="geometry">
-        <rect>
-         <x>210</x>
-         <y>120</y>
-         <width>22</width>
-         <height>101</height>
-        </rect>
-       </property>
-       <property name="orientation">
-        <enum>Qt::Vertical</enum>
-       </property>
-      </widget>
-      <widget class="QSlider" name="reconWindowHighSlider">
-       <property name="enabled">
-        <bool>false</bool>
-       </property>
-       <property name="geometry">
-        <rect>
-         <x>290</x>
-         <y>120</y>
-         <width>22</width>
-         <height>101</height>
-        </rect>
-       </property>
-       <property name="maximum">
-        <number>255</number>
-       </property>
-       <property name="value">
-        <number>255</number>
-       </property>
-       <property name="orientation">
-        <enum>Qt::Vertical</enum>
-       </property>
-      </widget>
-      <widget class="QDoubleSpinBox" name="reconWindowLowSpinBox">
+        <property name="text">
+         <string>开始重建</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="reconWindowLowSpinBox">
        <property name="geometry">
         <rect>
          <x>130</x>

@@ -218,15 +218,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.recon_window_low_spin_box = self.ui.findChild(
             QtWidgets.QDoubleSpinBox, "reconWindowLowSpinBox"
         )
-        # self.recon_window_high_slider = self.ui.findChild(QtWidgets.QSlider, "reconWindowHighSlider")
-        # self.recon_window_low_slider = self.ui.findChild(QtWidgets.QSlider, "reconWindowLowSlider")
         self.recon_window_change_button = self.ui.findChild(
             QtWidgets.QPushButton, "reconWindowChangeButton"
         )
         self.recon_window_high_spin_box.valueChanged.connect(self.set_window_high)
         self.recon_window_low_spin_box.valueChanged.connect(self.set_window_low)
-        # self.recon_window_high_slider.valueChanged.connect(self.set_slider_window_high)
-        # self.recon_window_low_slider.valueChanged.connect(self.set_slider_window_low)
         self.recon_window_change_button.clicked.connect(self.change_recon_window)
         self.recon_max_value = 255
         self.recon_min_value = 0
@@ -297,6 +293,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.cal_progress_bar.hide()
         self.cal_status_label.hide()
+        self.cal_result = None
 
     def append_log(self, text: str):
         color = "#d4d4d4"
@@ -322,41 +319,11 @@ class MainWindow(QtWidgets.QMainWindow):
         for v in self.ct_slice_view_list:
             v.change_window()
 
-    def set_slider_window_high(self, value):
-        max_value = self.recon_max_value
-        min_value = self.recon_min_value
-        self.recon_window_high_spin_box.setValue(
-            value * (max_value - min_value) / 255 + min_value
-        )
-        # self.recon_window_high_spin_box.setValue(value)
-        for v in self.ct_slice_view_list:
-            v.set_window_high(value)
-
-    def set_slider_window_low(self, value):
-        max_value = self.recon_max_value
-        min_value = self.recon_min_value
-        self.recon_window_low_spin_box.setValue(
-            value * (max_value - min_value) / 255 + min_value
-        )
-        # self.recon_window_low_spin_box.setValue(value)
-        for v in self.ct_slice_view_list:
-            v.set_window_high(value)
-
     def set_window_high(self, value):
-        max_value = self.recon_max_value
-        min_value = self.recon_min_value
-        self.recon_window_high_slider.setValue(
-            int((value - min_value) * 255 / (max_value - min_value))
-        )
         for v in self.ct_slice_view_list:
             v.set_window_high(value)
 
     def set_window_low(self, value):
-        max_value = self.recon_max_value
-        min_value = self.recon_min_value
-        self.recon_window_low_slider.setValue(
-            int((value - min_value) * 255 / (max_value - min_value))
-        )
         for v in self.ct_slice_view_list:
             v.set_window_low(value)
 
@@ -512,6 +479,11 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     def save_calibrate_result(self):
+        if not hasattr(self, "cal_result") or self.cal_result is None:
+            QtWidgets.QMessageBox.warning(
+                self.ui, "无校准结果", "请先运行校准，然后再保存结果。"
+            )
+            return
         cr = self.cal_result
         self.reconstruction_dialog.sod_line_edit.setText(str(cr["SOD"]))
         self.reconstruction_dialog.sdd_line_edit.setText(str(cr["SDD"]))
@@ -559,20 +531,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.recon_window_high_spin_box.setMinimum(min_value)
         self.recon_window_low_spin_box.setMaximum(max_value)
         self.recon_window_low_spin_box.setMinimum(min_value)
-        # self.recon_window_high_slider.setMaximum(255)
-        # self.recon_window_high_slider.setMinimum(0)
-        # self.recon_window_low_slider.setMaximum(255)
-        # self.recon_window_low_slider.setMinimum(0)
 
         self.recon_window_high_spin_box.setValue(max_value)
         self.recon_window_low_spin_box.setValue(min_value)
-        # self.recon_window_high_slider.setValue(255)
-        # self.recon_window_low_slider.setValue(0)
         if self.reconstruction_dialog.use_ct_hu.isChecked():
             self.recon_window_high_spin_box.setValue(3000)
             self.recon_window_low_spin_box.setValue(-1000)
-            # self.recon_window_high_slider.setValue((3000-min_value) /(max_value-min_value) * 255)
-            # self.recon_window_low_slider.setValue((0-min_value) /(max_value-min_value) * 255)
 
         for i in range(3):
             if self.reconstruction_dialog.use_ct_hu.isChecked():
