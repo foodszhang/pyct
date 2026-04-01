@@ -34,6 +34,10 @@ clean:
 conda-setup:
     powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-setup
 
-# conda 环境完整打包
+# 从已有 conda 环境重新跑 PyInstaller（跳过环境重建）
+conda-build:
+    powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-build
+
+# conda-setup + conda-build + package
 conda-full:
     powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-full

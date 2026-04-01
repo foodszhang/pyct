@@ -11,7 +11,7 @@
 # ============================================================
 
 param(
-    [ValidateSet("setup", "build", "rebuild", "package", "full", "clean", "conda-setup", "conda-full")]
+    [ValidateSet("setup", "build", "rebuild", "package", "full", "clean", "conda-setup", "conda-build", "conda-full")]
     [string]$Stage = "full",
     [string]$AstraWhl = ""
 )
@@ -127,8 +127,9 @@ function Invoke-Rebuild {
 # Stage: package — 组装便携目录 + zip
 # ============================================================
 function Invoke-Package {
-    if (-not (Test-Path "$DistDir\PyCT.exe")) {
-        Write-Error "PyCT.exe not found. Run 'just build' first."
+    # 兼容 onedir（默认）和 onefile 两种 spec 模式
+    if (-not (Test-Path "$DistDir\PyCT\PyCT.exe") -and -not (Test-Path "$DistDir\PyCT.exe")) {
+        Write-Error "PyCT.exe not found. Run 'just build' or 'just conda-build' first."
         exit 1
     }
     Write-Host "`n[Package] Assembling portable directory..." -ForegroundColor Yellow
@@ -280,11 +281,20 @@ function Invoke-CondaBuild {
         --workpath "$BuildDir\work" `
         "$RepoRoot\scripts\pyct.spec"
 
-    if (-not (Test-Path "$DistDir\PyCT.exe")) {
-        Write-Error "PyInstaller failed: PyCT.exe not found"
+    Write-Host "[CondaBuild] dist contents:"
+    Get-ChildItem "$DistDir" -ErrorAction SilentlyContinue | Select-Object Name
+
+    # 兼容 onedir（默认）和 onefile 两种 spec 模式
+    $exePath = ""
+    if (Test-Path "$DistDir\PyCT\PyCT.exe") {
+        $exePath = "$DistDir\PyCT\PyCT.exe"
+    } elseif (Test-Path "$DistDir\PyCT.exe") {
+        $exePath = "$DistDir\PyCT.exe"
+    } else {
+        Write-Error "PyInstaller failed: PyCT.exe not found in $DistDir"
         exit 1
     }
-    Write-Host "[CondaBuild] Done: $DistDir\PyCT.exe" -ForegroundColor Green
+    Write-Host "[CondaBuild] Done: $exePath" -ForegroundColor Green
 }
 
 # ============================================================
