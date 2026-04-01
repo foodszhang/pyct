@@ -227,6 +227,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.recon_max_value = 255
         self.recon_min_value = 0
 
+        self.recon_progress_bar = self.ui.findChild(
+            QtWidgets.QProgressBar, "reconProgressBar"
+        )
+        self.recon_stage_label = self.ui.findChild(QtWidgets.QLabel, "reconStageLabel")
+        self.recon_progress_bar.hide()
+        self.recon_stage_label.hide()
+
         # tab3 校准配置
         self.calButton = self.ui.findChild(QtWidgets.QPushButton, "calButton")
         self.saveCalButton = self.ui.findChild(QtWidgets.QPushButton, "saveCalButton")
@@ -558,11 +565,11 @@ class MainWindow(QtWidgets.QMainWindow):
             sample = img.ravel()[:: img.size // 1_000_000]
         else:
             sample = img.ravel()
-        low_val = float(np.percentile(sample, 1))
-        high_val = float(np.percentile(sample, 99))
+        low_val = float(np.percentile(sample, 0.1))
+        high_val = float(np.percentile(sample, 99.9))
         if high_val - low_val < 1e-6:
-            high_val = max_value
-            low_val = min_value
+            high_val = float(np.max(img))
+            low_val = float(np.min(img))
 
         self.recon_window_high_spin_box.setValue(high_val)
         self.recon_window_low_spin_box.setValue(low_val)
@@ -576,7 +583,56 @@ class MainWindow(QtWidgets.QMainWindow):
             self.ct_slice_view_list[i].show_img(img, i)
 
     def start_reconstruction(self):
-        self.reconstruction_dialog.ui.show()
+        if self.reconstruction_dialog.exec() == QtWidgets.QDialog.Accepted:
+            params = self.reconstruction_dialog.params
+            self._do_reconstruction(params)
+
+    def _do_reconstruction(self, params):
+        self.tab_widget.setEnabled(False)
+        self.recon_progress_bar.show()
+        self.recon_stage_label.show()
+        self.recon_progress_bar.setValue(0)
+        self.recon_stage_label.setText("准备中...")
+
+        self.recon_worker = rec.ReconWorker(params, self)
+        self.recon_worker.progress.connect(self._on_recon_progress)
+        self.recon_worker.finished.connect(self._on_recon_finished)
+        self.recon_worker.error.connect(self._on_recon_error)
+        self.recon_worker.start()
+
+    def _on_recon_progress(self, percent, stage_name):
+        self.recon_progress_bar.setValue(percent)
+        self.recon_stage_label.setText(stage_name)
+
+    def _on_recon_finished(self, rec):
+        self.recon_progress_bar.setStyleSheet(
+            "QProgressBar::chunk { background-color: #98c379; }"
+        )
+        self.recon_progress_bar.setValue(100)
+        self.show_reconstruction_result(rec)
+        self.save_config()
+        QtCore.QTimer.singleShot(
+            2000,
+            lambda: (
+                self.recon_progress_bar.hide(),
+                self.recon_stage_label.hide(),
+                self.recon_progress_bar.setStyleSheet(""),
+            ),
+        )
+
+    def _on_recon_error(self, msg):
+        self.recon_stage_label.setText(f"重建失败: {msg}")
+        self.tab_widget.setEnabled(True)
+        QtCore.QTimer.singleShot(
+            5000,
+            lambda: (
+                self.recon_progress_bar.hide(),
+                self.recon_stage_label.hide(),
+            ),
+        )
+
+    def save_config(self):
+        self.reconstruction_dialog.save_config()
 
     def open_dark_snap_window(self):
         self.dark_snap_window.ui.show()

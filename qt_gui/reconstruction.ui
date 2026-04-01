@@ -356,37 +356,8 @@
      </property>
     </widget>
    </item>
-   <item>
-    <widget class="QGroupBox" name="groupBoxProgress">
-     <property name="title">
-      <string>进度</string>
-     </property>
-     <layout class="QVBoxLayout" name="verticalLayoutProgress">
-     <item>
-      <widget class="QProgressBar" name="reconProgressBar">
-       <property name="value">
-        <number>0</number>
-       </property>
-       <property name="textVisible">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLabel" name="reconStageLabel">
-       <property name="text">
-        <string />
-       </property>
-       <property name="alignment">
-        <set>Qt::AlignCenter</set>
-       </property>
-      </widget>
-     </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QDialogButtonBox" name="buttonBox">
+    <item>
+     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="standardButtons">
       <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
      </property>

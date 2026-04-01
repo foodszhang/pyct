@@ -250,13 +250,6 @@ class ReconstrcionDialog(QtWidgets.QDialog):
 
         self.button_box.accepted.connect(self.startReconstruction)
 
-        self.recon_progress_bar = self.ui.findChild(
-            QtWidgets.QProgressBar, "reconProgressBar"
-        )
-        self.recon_stage_label = self.ui.findChild(QtWidgets.QLabel, "reconStageLabel")
-        self.recon_progress_bar.hide()
-        self.recon_stage_label.hide()
-
         self.eta_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "etaLineEdit")
         self.vc_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "vcLineEdit")
         self.vs_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "vsLineEdit")
@@ -346,6 +339,7 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         yaml.dump(Config, open(get_config_path(), "w"), Dumper=yaml.Dumper)
 
     def startReconstruction(self):
+        self.save_config()
         params = {
             "NX": int(self.voxel_size_x_line_edit.text()),
             "NY": int(self.voxel_size_y_line_edit.text()),
@@ -375,46 +369,5 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             "vol_center_y": float(self.roi_center_y_line_edit.text()),
             "vol_center_z": float(self.roi_center_z_line_edit.text()),
         }
-
-        self.parent_window.tab_widget.setEnabled(False)
-        self.recon_progress_bar.show()
-        self.recon_stage_label.show()
-        self.recon_progress_bar.setValue(0)
-        self.recon_stage_label.setText("准备中...")
-
-        self.recon_worker = ReconWorker(params, self.parent_window)
-        self.recon_worker.progress.connect(self.on_recon_progress)
-        self.recon_worker.finished.connect(self.on_recon_finished)
-        self.recon_worker.error.connect(self.on_recon_error)
-        self.recon_worker.start()
-
-    def on_recon_progress(self, percent, stage_name):
-        self.recon_progress_bar.setValue(percent)
-        self.recon_stage_label.setText(stage_name)
-
-    def on_recon_finished(self, rec):
-        self.recon_progress_bar.setStyleSheet(
-            "QProgressBar::chunk { background-color: #98c379; }"
-        )
-        self.recon_progress_bar.setValue(100)
-        self.ReconDone.emit(rec)
-        self.save_config()
-        QtCore.QTimer.singleShot(
-            2000,
-            lambda: (
-                self.recon_progress_bar.hide(),
-                self.recon_stage_label.hide(),
-                self.recon_progress_bar.setStyleSheet(""),
-            ),
-        )
-
-    def on_recon_error(self, msg):
-        self.recon_stage_label.setText(f"重建失败: {msg}")
-        self.parent_window.tab_widget.setEnabled(True)
-        QtCore.QTimer.singleShot(
-            5000,
-            lambda: (
-                self.recon_progress_bar.hide(),
-                self.recon_stage_label.hide(),
-            ),
-        )
+        self.params = params
+        self.accept()
