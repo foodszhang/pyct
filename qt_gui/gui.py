@@ -554,10 +554,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.recon_window_low_spin_box.setMaximum(max_value)
         self.recon_window_low_spin_box.setMinimum(min_value)
 
-        if self.reconstruction_dialog.use_ct_hu.isChecked():
-            high_val = 3000
-            low_val = -1000
+        if img.size > 1_000_000:
+            sample = img.ravel()[:: img.size // 1_000_000]
         else:
+            sample = img.ravel()
+        low_val = float(np.percentile(sample, 1))
+        high_val = float(np.percentile(sample, 99))
+        if high_val - low_val < 1e-6:
             high_val = max_value
             low_val = min_value
 

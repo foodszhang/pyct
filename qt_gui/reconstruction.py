@@ -26,7 +26,7 @@ class CTSliceView(QtWidgets.QWidget):
         layout.setSpacing(0)
 
         self.gv = pg.GraphicsView(self)
-        self.gv.setMinimumSize(420, 420)
+        self.gv.setMinimumSize(200, 200)
         layout.addWidget(self.gv, 1)
 
         self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self)
@@ -219,7 +219,6 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.use_scan_check_box = self.ui.findChild(
             QtWidgets.QCheckBox, "useScanCheckBox"
         )
-        self.use_ct_hu = self.ui.findChild(QtWidgets.QCheckBox, "useCTHUCheckBox")
         self.voxel_pixel_size_line_edit = self.ui.findChild(
             QtWidgets.QLineEdit, "voxelPixelSizeLineEdit"
         )
@@ -361,7 +360,6 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             "detector_x": float(self.detector_x_line_edit.text()),
             "detector_y": float(self.detector_y_line_edit.text()),
             "use_scan": self.use_scan_check_box.isChecked(),
-            "use_ct_hu": self.use_ct_hu.isChecked(),
             "rescale_slope": self.rescale_slope,
             "rescale_intercept": self.rescale_intercept,
             "proj_path": self.parent_window.project_path,

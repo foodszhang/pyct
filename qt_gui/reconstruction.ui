@@ -2,680 +2,398 @@
 <ui version="4.0">
  <class>Dialog</class>
  <widget class="QDialog" name="Dialog">
-   <property name="geometry">
-    <rect>
-     <x>0</x>
-     <y>0</y>
-     <width>564</width>
-     <height>760</height>
-    </rect>
-   </property>
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>500</width>
+    <height>700</height>
+   </rect>
+  </property>
   <property name="windowTitle">
    <string>重建参数选择</string>
   </property>
-   <widget class="QLabel" name="reconStageLabel">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>530</y>
-      <width>521</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string />
-    </property>
-    <property name="alignment">
-     <set>Qt::AlignCenter</set>
-    </property>
-   </widget>
-   <widget class="QProgressBar" name="reconProgressBar">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>550</y>
-      <width>521</width>
-      <height>23</height>
-     </rect>
-    </property>
-    <property name="value">
-     <number>0</number>
-    </property>
-    <property name="textVisible">
-     <bool>true</bool>
-    </property>
-   </widget>
-   <widget class="QDialogButtonBox" name="buttonBox">
-    <property name="geometry">
-     <rect>
-      <x>120</x>
-      <y>710</y>
-      <width>341</width>
-      <height>32</height>
-     </rect>
-    </property>
-    <property name="orientation">
-     <enum>Qt::Horizontal</enum>
-    </property>
-    <property name="standardButtons">
-     <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>30</y>
-      <width>141</width>
-      <height>20</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>光源到旋转中心距离(mm)</string>
-    </property>
-   </widget>
-  <widget class="QLineEdit" name="SODLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>30</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>722.6798</string>
-   </property>
-  </widget>
-  <widget class="QLabel" name="label_2">
-   <property name="geometry">
-    <rect>
-     <x>20</x>
-     <y>60</y>
-     <width>141</width>
-     <height>20</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>光源到探测版距离(mm)</string>
-   </property>
-  </widget>
-  <widget class="QLineEdit" name="SDDLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>60</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>778.6765</string>
-   </property>
-  </widget>
-  <widget class="QLabel" name="label_3">
-   <property name="geometry">
-    <rect>
-     <x>20</x>
-     <y>360</y>
-     <width>111</width>
-     <height>16</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>生成体素X轴长度</string>
-   </property>
-  </widget>
-  <widget class="QLineEdit" name="voxelSizeXLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>360</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>512</string>
-   </property>
-  </widget>
-  <widget class="QLabel" name="label_4">
-   <property name="geometry">
-    <rect>
-     <x>40</x>
-     <y>90</y>
-     <width>111</width>
-     <height>16</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>图像横轴像素个数</string>
-   </property>
-  </widget>
-   <widget class="QLineEdit" name="columnCountLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>170</x>
-      <y>90</y>
-      <width>113</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>768</string>
-    </property>
-   </widget>
-  <widget class="QLabel" name="label_5">
-   <property name="geometry">
-    <rect>
-     <x>40</x>
-     <y>120</y>
-     <width>111</width>
-     <height>16</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>图像纵轴像素个数</string>
-   </property>
-  </widget>
-   <widget class="QLineEdit" name="rowCountLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>170</x>
-      <y>120</y>
-      <width>113</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>972</string>
-    </property>
-   </widget>
-  <widget class="QLabel" name="label_6">
-   <property name="geometry">
-    <rect>
-     <x>20</x>
-     <y>150</y>
-     <width>131</width>
-     <height>20</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>图像横轴像素间距(mm)</string>
-   </property>
-  </widget>
-  <widget class="QLabel" name="label_7">
-   <property name="geometry">
-    <rect>
-     <x>20</x>
-     <y>180</y>
-     <width>131</width>
-     <height>20</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>图像纵轴像素间距(mm)</string>
-   </property>
-  </widget>
-   <widget class="QLineEdit" name="xSpacingLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>170</x>
-      <y>150</y>
-      <width>113</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>0.0748</string>
-    </property>
-   </widget>
-   <widget class="QLineEdit" name="ySpacingLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>170</x>
-      <y>180</y>
-      <width>113</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>0.0748</string>
-    </property>
-   </widget>
-  <widget class="QLabel" name="label_8">
-   <property name="geometry">
-    <rect>
-     <x>20</x>
-     <y>210</y>
-     <width>131</width>
-     <height>20</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>图片间隔角度</string>
-   </property>
-  </widget>
-  <widget class="QLineEdit" name="angleLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>210</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>1</string>
-   </property>
-  </widget>
-  <widget class="QLabel" name="label_9">
-   <property name="geometry">
-    <rect>
-     <x>20</x>
-     <y>240</y>
-     <width>131</width>
-     <height>20</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>体素像素间距(mm)</string>
-   </property>
-  </widget>
-   <widget class="QLineEdit" name="voxelPixelSizeLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>170</x>
-      <y>240</y>
-      <width>113</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>0.25</string>
-    </property>
-    </widget>
-   <widget class="QLabel" name="label_10">
-   <property name="geometry">
-    <rect>
-     <x>20</x>
-     <y>270</y>
-     <width>131</width>
-     <height>20</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>探测器中心横坐标(像素)</string>
-   </property>
-  </widget>
-  <widget class="QLineEdit" name="detectorXLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>270</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>5.3333</string>
-   </property>
-  </widget>
-  <widget class="QLabel" name="label_11">
-   <property name="geometry">
-    <rect>
-     <x>20</x>
-     <y>300</y>
-     <width>131</width>
-     <height>20</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>探测器中心纵坐标(像素)</string>
-   </property>
-  </widget>
-  <widget class="QLineEdit" name="detectorYLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>300</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>41.77848</string>
-   </property>
-  </widget>
-  <widget class="QLineEdit" name="rotationLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>170</x>
-     <y>330</y>
-     <width>113</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>-0.15</string>
-   </property>
-  </widget>
-   <widget class="QLabel" name="label_12">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>330</y>
-      <width>131</width>
-      <height>20</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>探测器倾斜角度(°)</string>
-    </property>
-   </widget>
-   <widget class="QGroupBox" name="groupBoxCalib">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>460</y>
-      <width>521</width>
-      <height>80</height>
-     </rect>
-    </property>
-    <property name="title">
-     <string>校准参数</string>
-    </property>
-    <widget class="QLabel" name="label_eta">
-     <property name="geometry">
-      <rect>
-       <x>10</x>
-       <y>25</y>
-       <width>80</width>
-       <height>16</height>
-      </rect>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QGroupBox" name="groupBoxGeometry">
+     <property name="title">
+      <string>几何参数</string>
      </property>
+     <layout class="QFormLayout" name="formLayoutGeometry">
+      <item row="0" column="0">
+       <widget class="QLabel" name="labelSod">
+        <property name="text">
+         <string>光源到旋转中心距离(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="SODLineEdit">
+        <property name="text">
+         <string>722.6798</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="labelSdd">
+        <property name="text">
+         <string>光源到探测版距离(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="SDDLineEdit">
+        <property name="text">
+         <string>778.6765</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="labelCol">
+        <property name="text">
+         <string>图像横轴像素个数</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLineEdit" name="columnCountLineEdit">
+        <property name="text">
+         <string>768</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="labelRow">
+        <property name="text">
+         <string>图像纵轴像素个数</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLineEdit" name="rowCountLineEdit">
+        <property name="text">
+         <string>972</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="labelXSp">
+        <property name="text">
+         <string>图像横轴像素间距(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QLineEdit" name="xSpacingLineEdit">
+        <property name="text">
+         <string>0.0748</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="labelYSp">
+        <property name="text">
+         <string>图像纵轴像素间距(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QLineEdit" name="ySpacingLineEdit">
+        <property name="text">
+         <string>0.0748</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0">
+       <widget class="QLabel" name="labelAngle">
+        <property name="text">
+         <string>图片间隔角度</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1">
+       <widget class="QLineEdit" name="angleLineEdit">
+        <property name="text">
+         <string>1</string>
+        </property>
+       </widget>
+      </item>
+      <item row="7" column="0">
+       <widget class="QLabel" name="labelDetX">
+        <property name="text">
+         <string>探测器中心横坐标(像素)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="7" column="1">
+       <widget class="QLineEdit" name="detectorXLineEdit">
+        <property name="text">
+         <string>5.3333</string>
+        </property>
+       </widget>
+      </item>
+      <item row="8" column="0">
+       <widget class="QLabel" name="labelDetY">
+        <property name="text">
+         <string>探测器中心纵坐标(像素)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="8" column="1">
+       <widget class="QLineEdit" name="detectorYLineEdit">
+        <property name="text">
+         <string>41.77848</string>
+        </property>
+       </widget>
+      </item>
+      <item row="9" column="0">
+       <widget class="QLabel" name="labelRot">
+        <property name="text">
+         <string>探测器倾斜角度(°)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="9" column="1">
+       <widget class="QLineEdit" name="rotationLineEdit">
+        <property name="text">
+         <string>-0.15</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupBoxVolume">
+     <property name="title">
+      <string>重建体参数</string>
+     </property>
+     <layout class="QFormLayout" name="formLayoutVolume">
+      <item row="0" column="0">
+       <widget class="QLabel" name="labelVoxelPs">
+        <property name="text">
+         <string>体素像素间距(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="voxelPixelSizeLineEdit">
+        <property name="text">
+         <string>0.25</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="labelVoxX">
+        <property name="text">
+         <string>生成体素X轴长度</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="voxelSizeXLineEdit">
+        <property name="text">
+         <string>512</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="labelVoxY">
+        <property name="text">
+         <string>生成体素Y轴长度</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLineEdit" name="voxelSizeYLineEdit">
+        <property name="text">
+         <string>512</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="labelVoxZ">
+        <property name="text">
+         <string>生成体素Z轴长度</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLineEdit" name="voxelSizeZLineEdit">
+        <property name="text">
+         <string>512</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="labelRoiX">
+        <property name="text">
+         <string>ROI 中心 X (mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QLineEdit" name="roiCenterXLineEdit">
+        <property name="text">
+         <string>0.0</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="labelRoiY">
+        <property name="text">
+         <string>ROI 中心 Y (mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QLineEdit" name="roiCenterYLineEdit">
+        <property name="text">
+         <string>0.0</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0">
+       <widget class="QLabel" name="labelRoiZ">
+        <property name="text">
+         <string>ROI 中心 Z (mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1">
+       <widget class="QLineEdit" name="roiCenterZLineEdit">
+        <property name="text">
+         <string>0.0</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupBoxCalib">
+     <property name="title">
+      <string>校准参数</string>
+     </property>
+     <layout class="QFormLayout" name="formLayoutCalib">
+      <item row="0" column="0">
+       <widget class="QLabel" name="labelEta">
+        <property name="text">
+         <string>eta (rad)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="etaLineEdit">
+        <property name="text">
+         <string>0.0</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="labelVc">
+        <property name="text">
+         <string>vc_recon</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="vcLineEdit">
+        <property name="text">
+         <string>0.0</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="labelVs">
+        <property name="text">
+         <string>vs_recon</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLineEdit" name="vsLineEdit">
+        <property name="text">
+         <string>0.0</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="labelSx">
+        <property name="text">
+         <string>sx</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLineEdit" name="sxLineEdit">
+        <property name="text">
+         <string>0.5</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="labelSy">
+        <property name="text">
+         <string>sy</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QLineEdit" name="syLineEdit">
+        <property name="text">
+         <string>0.5</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QCheckBox" name="useScanCheckBox">
      <property name="text">
-      <string>eta (rad)</string>
+      <string>使用采集数据重建（不勾选自动选择当前项目文件下文件进行重建）</string>
      </property>
     </widget>
-    <widget class="QLineEdit" name="etaLineEdit">
-     <property name="geometry">
-      <rect>
-       <x>95</x>
-       <y>22</y>
-       <width>100</width>
-       <height>21</height>
-      </rect>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupBoxProgress">
+     <property name="title">
+      <string>进度</string>
      </property>
-     <property name="text">
-      <string>0.0</string>
+     <layout class="QVBoxLayout" name="verticalLayoutProgress">
+     <item>
+      <widget class="QProgressBar" name="reconProgressBar">
+       <property name="value">
+        <number>0</number>
+       </property>
+       <property name="textVisible">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="reconStageLabel">
+       <property name="text">
+        <string />
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignCenter</set>
+       </property>
+      </widget>
+     </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
      </property>
     </widget>
-    <widget class="QLabel" name="label_vc">
-     <property name="geometry">
-      <rect>
-       <x>210</x>
-       <y>25</y>
-       <width>80</width>
-       <height>16</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>vc_recon</string>
-     </property>
-    </widget>
-    <widget class="QLineEdit" name="vcLineEdit">
-     <property name="geometry">
-      <rect>
-       <x>295</x>
-       <y>22</y>
-       <width>100</width>
-       <height>21</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>0.0</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_vs">
-     <property name="geometry">
-      <rect>
-       <x>410</x>
-       <y>25</y>
-       <width>80</width>
-       <height>16</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>vs_recon</string>
-     </property>
-    </widget>
-    <widget class="QLineEdit" name="vsLineEdit">
-     <property name="geometry">
-      <rect>
-       <x>410</x>
-       <y>50</y>
-       <width>100</width>
-       <height>21</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>0.0</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_sx">
-     <property name="geometry">
-      <rect>
-       <x>10</x>
-       <y>52</y>
-       <width>80</width>
-       <height>16</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>sx</string>
-     </property>
-    </widget>
-    <widget class="QLineEdit" name="sxLineEdit">
-     <property name="geometry">
-      <rect>
-       <x>95</x>
-       <y>50</y>
-       <width>100</width>
-       <height>21</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>0.5</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_sy">
-     <property name="geometry">
-      <rect>
-       <x>210</x>
-       <y>52</y>
-       <width>80</width>
-       <height>16</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>sy</string>
-     </property>
-    </widget>
-    <widget class="QLineEdit" name="syLineEdit">
-     <property name="geometry">
-      <rect>
-       <x>295</x>
-       <y>50</y>
-       <width>100</width>
-       <height>21</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>0.5</string>
-     </property>
-    </widget>
-   </widget>
-   <widget class="QCheckBox" name="useCTHUCheckBox">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>645</y>
-      <width>391</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>使用CT值作为像素值重建</string>
-    </property>
-    <property name="checked">
-     <bool>true</bool>
-    </property>
-   </widget>
-   <widget class="QCheckBox" name="useScanCheckBox">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>675</y>
-      <width>391</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>使用采集数据重建（不勾选自动选择当前项目文件下文件进行重建）</string>
-    </property>
-   </widget>
-   <widget class="QLineEdit" name="voxelSizeYLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>170</x>
-      <y>580</y>
-      <width>113</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>512</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label_13">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>580</y>
-      <width>111</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>生成体素Y轴长度</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label_14">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>610</y>
-      <width>111</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>生成体素Z轴长度</string>
-    </property>
-   </widget>
-   <widget class="QLineEdit" name="voxelSizeZLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>170</x>
-      <y>610</y>
-      <width>113</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>512</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="labelRoiCenterX">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>640</y>
-      <width>80</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>ROI 中心 X (mm)</string>
-    </property>
-   </widget>
-   <widget class="QLineEdit" name="roiCenterXLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>170</x>
-      <y>638</y>
-      <width>113</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>0.0</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="labelRoiCenterY">
-    <property name="geometry">
-     <rect>
-      <x>300</x>
-      <y>640</y>
-      <width>80</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>ROI 中心 Y (mm)</string>
-    </property>
-   </widget>
-   <widget class="QLineEdit" name="roiCenterYLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>385</x>
-      <y>638</y>
-      <width>113</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>0.0</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="labelRoiCenterZ">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>665</y>
-      <width>80</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>ROI 中心 Z (mm)</string>
-    </property>
-   </widget>
-   <widget class="QLineEdit" name="roiCenterZLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>170</x>
-      <y>663</y>
-      <width>113</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>0.0</string>
-    </property>
-   </widget>
-  </widget>
+   </item>
+  </layout>
+ </widget>
  <resources />
  <connections>
   <connection>
