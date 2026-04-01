@@ -254,6 +254,7 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.button_box = self.ui.findChild(QtWidgets.QDialogButtonBox, "buttonBox")
 
         self.button_box.accepted.connect(self.startReconstruction)
+        self.button_box.rejected.connect(self.reject)
 
         self.eta_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "etaLineEdit")
         self.vc_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "vcLineEdit")
