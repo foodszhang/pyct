@@ -228,7 +228,10 @@ function Invoke-CondaSetup {
     $CondaEnvName = "pyct-cuda11"
 
     Write-Host " Removing old conda env if exists..."
-    & conda env remove -n $CondaEnvName -y 2>&1 | Out-Null
+    $envExists = conda env list 2>&1 | Select-String $CondaEnvName
+    if ($envExists) {
+        & conda env remove -n $CondaEnvName -y 2>&1 | Out-Null
+    }
 
     Write-Host " Creating conda env $CondaEnvName with Python 3.11..."
     & conda create -n $CondaEnvName python=3.11 -y
