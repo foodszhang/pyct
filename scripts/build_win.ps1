@@ -278,9 +278,12 @@ function Invoke-CondaSetup {
     if ($LASTEXITCODE -ne 0) { Write-Error "pip install failed"; exit 1 }
 
     Write-Host "`n  --- Conda Env ---" -ForegroundColor Cyan
+    $ErrorActionBackup = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & $condaPython -c "import sys; print(f'  Python: {sys.version}')"
     & $condaPython -c "import astra; print(f'  ASTRA: {astra.__version__}, CUDA: {astra.use_cuda()}')"
     & $condaPython -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')"
+    $ErrorActionPreference = $ErrorActionBackup
     Write-Host "  ------------------" -ForegroundColor Cyan
 
     $condaPython | Out-File -Encoding utf8 "$RepoRoot\.conda_python_path.txt"
@@ -361,8 +364,12 @@ function Invoke-CondaFix {
 
     # 检查 astra 是否已安装
     Write-Host "  Checking astra-toolbox..." -ForegroundColor Yellow
+    $ErrorActionBackup2 = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     $astraCheck = & $condaPython -c "import astra; print(astra.__version__)" 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $astraExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $ErrorActionBackup2
+    if ($astraExitCode -ne 0) {
         Write-Host "  astra not found, installing via mamba..." -ForegroundColor Yellow
         mamba install -n $CondaEnvName -c astra-toolbox -c nvidia astra-toolbox "cuda-version=11" -y
         if ($LASTEXITCODE -ne 0) {
@@ -386,9 +393,12 @@ function Invoke-CondaFix {
 
     # 验证
     Write-Host "`n  --- Conda Env ---" -ForegroundColor Cyan
+    $ErrorActionBackup = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & $condaPython -c "import sys; print(f'  Python: {sys.version}')"
     & $condaPython -c "import astra; print(f'  ASTRA: {astra.__version__}, CUDA: {astra.use_cuda()}')"
     & $condaPython -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')"
+    $ErrorActionPreference = $ErrorActionBackup
     Write-Host "  ------------------" -ForegroundColor Cyan
     Write-Host "[CondaFix] Done." -ForegroundColor Green
 }
