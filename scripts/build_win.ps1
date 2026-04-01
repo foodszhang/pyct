@@ -11,7 +11,7 @@
 # ============================================================
 
 param(
-    [ValidateSet("setup", "build", "rebuild", "package", "full", "clean", "conda-setup", "conda-build", "conda-full")]
+    [ValidateSet("setup", "build", "rebuild", "package", "full", "clean", "conda-setup", "conda-build", "conda-full", "conda-fix")]
     [string]$Stage = "full",
     [string]$AstraWhl = ""
 )
@@ -256,23 +256,34 @@ function Invoke-CondaSetup {
     mamba create -n $CondaEnvName python=3.11 -y
     if ($LASTEXITCODE -ne 0) { Write-Error "mamba create failed"; exit 1 }
 
-    $CondaEnvPath = (conda run -n $CondaEnvName python -c "import sys; print(sys.executable)").Trim()
-    Write-Host " Conda env python: $CondaEnvPath" -ForegroundColor Green
+    # 用 conda info --json 获取环境目录，避免 conda run 在 Windows 上的路径问题
+    $condaInfo = conda info --json | ConvertFrom-Json
+    $condaEnvsDir = $condaInfo.envs_dirs[0]
+    $CondaEnvPath = "$condaEnvsDir\$CondaEnvName"
+    $condaPython = "$CondaEnvPath\python.exe"
+    $condaPip = "$CondaEnvPath\Scripts\pip.exe"
+    if (-not (Test-Path $condaPython)) {
+        Write-Error "conda env Python not found at $condaPython"
+        exit 1
+    }
+    Write-Host "  Env path: $CondaEnvPath" -ForegroundColor Green
+    Write-Host "  Python:   $condaPython" -ForegroundColor Green
 
     Write-Host " Installing astra-toolbox (CUDA 11) (using mamba)..."
     mamba install -n $CondaEnvName -c astra-toolbox -c nvidia astra-toolbox "cuda-version=11" -y
     if ($LASTEXITCODE -ne 0) { Write-Error "mamba install astra failed"; exit 1 }
 
     Write-Host " Installing Python dependencies..."
-    conda run -n $CondaEnvName --no-capture-output pip install -r "$RepoRoot\requirements_qt.txt"
-    conda run -n $CondaEnvName --no-capture-output pip install pyinstaller
+    & $condaPip install -r "$RepoRoot\requirements_qt.txt" pyinstaller
+    if ($LASTEXITCODE -ne 0) { Write-Error "pip install failed"; exit 1 }
 
-    Write-Host "`n --- Environment ---" -ForegroundColor Cyan
-    conda run -n $CondaEnvName python -c "import astra; print(f'  ASTRA: {astra.__version__}'); print(f'  CUDA: {astra.use_cuda()}')"
-    conda run -n $CondaEnvName python -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')"
-    Write-Host " --------------------" -ForegroundColor Cyan
+    Write-Host "`n  --- Conda Env ---" -ForegroundColor Cyan
+    & $condaPython -c "import sys; print(f'  Python: {sys.version}')"
+    & $condaPython -c "import astra; print(f'  ASTRA: {astra.__version__}, CUDA: {astra.use_cuda()}')"
+    & $condaPython -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')"
+    Write-Host "  ------------------" -ForegroundColor Cyan
 
-    $CondaEnvPath | Out-File -Encoding utf8 "$RepoRoot\.conda_python_path.txt"
+    $condaPython | Out-File -Encoding utf8 "$RepoRoot\.conda_python_path.txt"
     Write-Host "[CondaSetup] Done. Python path saved to .conda_python_path.txt" -ForegroundColor Green
 }
 
@@ -316,6 +327,73 @@ function Invoke-CondaBuild {
 }
 
 # ============================================================
+# Stage: conda-fix — 修复已有 conda 环境（不重建环境）
+# ============================================================
+function Invoke-CondaFix {
+    Write-Host "`n[CondaFix] Repairing existing conda environment..." -ForegroundColor Yellow
+
+    $condaCmd = Get-Command conda -ErrorAction SilentlyContinue
+    if (-not $condaCmd) {
+        Write-Error "conda not found."
+        exit 1
+    }
+
+    $mambaCmd = Get-Command mamba -ErrorAction SilentlyContinue
+    if (-not $mambaCmd) {
+        Write-Warning "mamba not found, falling back to conda."
+        Set-Alias -Name mamba -Value conda -Scope Script
+    }
+
+    $CondaEnvName = "pyct-cuda11"
+    $CondaPythonFile = "$RepoRoot\.conda_python_path.txt"
+
+    $condaInfo = conda info --json | ConvertFrom-Json
+    $condaEnvsDir = $condaInfo.envs_dirs[0]
+    $CondaEnvPath = "$condaEnvsDir\$CondaEnvName"
+    $condaPython = "$CondaEnvPath\python.exe"
+    $condaPip = "$CondaEnvPath\Scripts\pip.exe"
+
+    if (-not (Test-Path $condaPython)) {
+        Write-Error "conda env not found at $CondaEnvPath. Run 'just conda-setup' first."
+        exit 1
+    }
+    Write-Host "  Env path: $CondaEnvPath" -ForegroundColor Green
+
+    # 检查 astra 是否已安装
+    Write-Host "  Checking astra-toolbox..." -ForegroundColor Yellow
+    $astraCheck = & $condaPython -c "import astra; print(astra.__version__)" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  astra not found, installing via mamba..." -ForegroundColor Yellow
+        mamba install -n $CondaEnvName -c astra-toolbox -c nvidia astra-toolbox "cuda-version=11" -y
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to install astra-toolbox"
+            exit 1
+        }
+    } else {
+        Write-Host "  astra OK: $astraCheck" -ForegroundColor Green
+    }
+
+    # 重装 pip 依赖
+    Write-Host "  Reinstalling pip dependencies..." -ForegroundColor Yellow
+    & $condaPip install -r "$RepoRoot\requirements_qt.txt" pyinstaller
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "pip install failed"
+        exit 1
+    }
+
+    # 保存 python 路径
+    $condaPython | Out-File -Encoding utf8 $CondaPythonFile
+
+    # 验证
+    Write-Host "`n  --- Conda Env ---" -ForegroundColor Cyan
+    & $condaPython -c "import sys; print(f'  Python: {sys.version}')"
+    & $condaPython -c "import astra; print(f'  ASTRA: {astra.__version__}, CUDA: {astra.use_cuda()}')"
+    & $condaPython -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')"
+    Write-Host "  ------------------" -ForegroundColor Cyan
+    Write-Host "[CondaFix] Done." -ForegroundColor Green
+}
+
+# ============================================================
 # Internal helpers
 # ============================================================
 function Assert-Venv {
@@ -354,6 +432,7 @@ switch ($Stage) {
     "full"        { Invoke-Setup; Invoke-Build; Invoke-Package }
     "clean"       { Invoke-Clean }
     "conda-setup" { Invoke-CondaSetup }
+    "conda-fix"   { Invoke-CondaFix }
     "conda-full"  { Invoke-CondaSetup; Invoke-CondaBuild; Invoke-Package }
 }
 

@@ -38,6 +38,10 @@ conda-setup:
 conda-build:
     powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-build
 
+# 修复已有 conda 环境（补装 astra + 重装 pip 依赖，不重建环境）
+conda-fix:
+    powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-fix
+
 # conda-setup + conda-build + package
 conda-full:
     powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-full
