@@ -27,6 +27,8 @@ class CTSliceView(QtWidgets.QWidget):
 
         self.gv = pg.GraphicsView(self)
         self.gv.setMinimumSize(200, 200)
+        self.vb = pg.ViewBox(lockAspect=True)
+        self.gv.setCentralItem(self.vb)
         layout.addWidget(self.gv, 1)
 
         self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self)
@@ -78,27 +80,24 @@ class CTSliceView(QtWidgets.QWidget):
         s = self._get_slice(idx)
         if s is None:
             return
-        rect = QtCore.QRectF(0, 0, self.gv.size().width(), self.gv.size().height())
-        use_global = self.min_window is not None and self.max_window is not None
+        use_global = (self.min_window is not None and self.max_window is not None)
         if self.imageItem is None:
             if use_global:
                 self.imageItem = pg.ImageItem(
-                    s.T,
-                    autoLevels=False,
-                    levels=(self.min_window, self.max_window),
-                    rect=rect,
+                    s.T, autoLevels=False,
+                    levels=(self.min_window, self.max_window)
                 )
             else:
-                self.imageItem = pg.ImageItem(s.T, autoLevels=True, rect=rect)
-            self.gv.addItem(self.imageItem)
+                self.imageItem = pg.ImageItem(s.T, autoLevels=True)
+            self.vb.addItem(self.imageItem)
         else:
             if use_global:
                 self.imageItem.setImage(
-                    s.T, autoLevels=False, levels=(self.min_window, self.max_window)
+                    s.T, autoLevels=False,
+                    levels=(self.min_window, self.max_window)
                 )
             else:
                 self.imageItem.setImage(s.T, autoLevels=True)
-            self.imageItem.setRect(rect)
 
     def _on_slider_changed(self, value):
         self._update_display(value)

@@ -548,39 +548,49 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def show_reconstruction_result(self, img: np.ndarray):
         self.tab_widget.setEnabled(True)
-        max_value = np.max(img)
-        min_value = np.min(img)
-        self.recon_max_value = max_value
-        self.recon_min_value = min_value
 
-        self.recon_window_high_spin_box.blockSignals(True)
-        self.recon_window_low_spin_box.blockSignals(True)
-
-        self.recon_window_high_spin_box.setMaximum(max_value)
-        self.recon_window_high_spin_box.setMinimum(min_value)
-        self.recon_window_low_spin_box.setMaximum(max_value)
-        self.recon_window_low_spin_box.setMinimum(min_value)
-
-        if img.size > 1_000_000:
-            sample = img.ravel()[:: img.size // 1_000_000]
+        # 归一化到 [0, 1000] 用于显示
+        img_raw_min = float(np.min(img))
+        img_raw_max = float(np.max(img))
+        if img_raw_max - img_raw_min > 1e-9:
+            img_display = (img - img_raw_min) / (img_raw_max - img_raw_min) * 1000.0
         else:
-            sample = img.ravel()
+            img_display = np.zeros_like(img, dtype=np.float32)
+
+        self.recon_max_value = 1000.0
+        self.recon_min_value = 0.0
+
+        # 百分位窗位（在归一化后的 [0,1000] 上计算）
+        if img_display.size > 1_000_000:
+            sample = img_display.ravel()[::img_display.size // 1_000_000]
+        else:
+            sample = img_display.ravel()
         low_val = float(np.percentile(sample, 0.1))
         high_val = float(np.percentile(sample, 99.9))
         if high_val - low_val < 1e-6:
-            high_val = float(np.max(img))
-            low_val = float(np.min(img))
+            high_val = 1000.0
+            low_val = 0.0
 
+        # spinbox 范围固定 0-1000
+        self.recon_window_high_spin_box.blockSignals(True)
+        self.recon_window_low_spin_box.blockSignals(True)
+        self.recon_window_high_spin_box.setMinimum(0.0)
+        self.recon_window_high_spin_box.setMaximum(1000.0)
+        self.recon_window_low_spin_box.setMinimum(0.0)
+        self.recon_window_low_spin_box.setMaximum(1000.0)
+        self.recon_window_high_spin_box.setDecimals(1)
+        self.recon_window_low_spin_box.setDecimals(1)
+        self.recon_window_high_spin_box.setSingleStep(1.0)
+        self.recon_window_low_spin_box.setSingleStep(1.0)
         self.recon_window_high_spin_box.setValue(high_val)
         self.recon_window_low_spin_box.setValue(low_val)
-
         self.recon_window_high_spin_box.blockSignals(False)
         self.recon_window_low_spin_box.blockSignals(False)
 
         for i in range(3):
             self.ct_slice_view_list[i].min_window = low_val
             self.ct_slice_view_list[i].max_window = high_val
-            self.ct_slice_view_list[i].show_img(img, i)
+            self.ct_slice_view_list[i].show_img(img_display, i)
 
     def start_reconstruction(self):
         if self.reconstruction_dialog.exec() == QtWidgets.QDialog.Accepted:
