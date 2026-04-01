@@ -207,6 +207,11 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         loader = QUiLoader()
         self.parent_window = parent_window
         self.ui = loader.load(get_ui_path("reconstruction.ui"), self)
+
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.ui)
+
         self.angle_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "angleLineEdit")
         self.column_count_line_edit = self.ui.findChild(
             QtWidgets.QLineEdit, "columnCountLineEdit"
