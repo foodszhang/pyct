@@ -300,10 +300,16 @@ function Invoke-CondaBuild {
         exit 1
     }
     $CondaPython = (Get-Content $condaPythonFile).Trim()
-    $CondaPyInstaller = Join-Path (Split-Path $CondaPython) "pyinstaller.exe"
+    $CondaPyInstaller = Join-Path (Split-Path $CondaPython) "Scripts\pyinstaller.exe"
+
+    if (-not (Test-Path $CondaPyInstaller)) {
+        Write-Error "PyInstaller not found at $CondaPyInstaller. Run 'just conda-setup' or 'just conda-fix' first."
+        exit 1
+    }
 
     Write-Host "`n[CondaBuild] Running PyInstaller from conda env..." -ForegroundColor Yellow
-    Write-Host " Python: $CondaPython"
+    Write-Host " Python:   $CondaPython" -ForegroundColor Green
+    Write-Host " PyInstaller: $CondaPyInstaller" -ForegroundColor Green
 
     if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
 
@@ -443,6 +449,7 @@ switch ($Stage) {
     "clean"       { Invoke-Clean }
     "conda-setup" { Invoke-CondaSetup }
     "conda-fix"   { Invoke-CondaFix }
+    "conda-build" { Invoke-CondaBuild }
     "conda-full"  { Invoke-CondaSetup; Invoke-CondaBuild; Invoke-Package }
 }
 
