@@ -17,7 +17,7 @@ from enum import Enum
 from typing import Literal
 import time
 import queue, threading
-from utils.paths import get_config_path, get_ui_path
+from utils.paths import get_config_path, get_ui_path, find_py34, get_detector_bridge_dir
 
 
 def _readline_with_timeout(stream, timeout=15):
@@ -108,23 +108,37 @@ class SnapWindow(QtWidgets.QDialog):
 
     def scan_thread(self):
         try:
-            py34 = os.environ.get("py34", "")
+            py34 = find_py34()
             if not py34:
-                self.error.emit("py34环境变量未配置!请检查系统环境变量")
+                self.error.emit(
+                    "找不到 Python 3.4 运行环境。\n"
+                    "请确认 detector_bridge/py34/python.exe 存在，"
+                    "或设置 py34 环境变量。"
+                )
                 self._unfreeze_ui()
                 return
+            print(f"[Detector] 使用 py34: {py34}")
 
             full_filename = os.path.join(
                 self.parent_window.project_path, self.file_name_line_edit.text().strip()
             )
             self.full_filename = full_filename
 
+            ready_event = threading.Event()
             server_thread = Thread(
                 target=pipe.detector_server,
                 args=(r"\\.\pipe\detectResult", b"ctRestruct", self.detector_receive),
+                kwargs={"ready_event": ready_event},
                 daemon=True,
             )
             server_thread.start()
+
+            if not ready_event.wait(timeout=5):
+                self.error.emit("pipe server 启动超时")
+                self._unfreeze_ui()
+                return
+
+            detector_bridge_dir = get_detector_bridge_dir()
 
             # seq exposeTime gapTime number
             if self.snap_type == SnapType.EMPTY:
@@ -162,21 +176,27 @@ class SnapWindow(QtWidgets.QDialog):
                     self.expose_time_line_edit.text().strip(),
                     self.number_line_edit.text().strip(),
                 ],
+                cwd=detector_bridge_dir,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
             assert sub.stdout
             assert sub.stdin
 
             ready_cmd = _readline_with_timeout(sub.stdout, timeout=15)
             self.ProgressBarChanged.emit(20, "准备中")
-            if ready_cmd is None:
-                self.error.emit("探测器启动超时（15s未收到READY）")
-                sub.kill()
-                self._unfreeze_ui()
-                return
-            if not ready_cmd.startswith(b"READY"):
-                self.error.emit(f"探测器握手失败，收到: {ready_cmd!r}")
+            if ready_cmd is None or not ready_cmd.startswith(b"READY"):
+                try:
+                    stderr_out = sub.stderr.read(2048) if sub.stderr else b""
+                except Exception:
+                    stderr_out = b""
+                print(f"[Error] detector.py stderr: {stderr_out.decode(errors='replace')}")
+                self.error.emit(
+                    f"探测器启动失败。\n"
+                    f"ready_cmd={ready_cmd!r}\n"
+                    f"stderr={stderr_out.decode(errors='replace')}"
+                )
                 sub.kill()
                 self._unfreeze_ui()
                 return

@@ -11,7 +11,7 @@
 # ============================================================
 
 param(
-    [ValidateSet("setup", "build", "rebuild", "package", "full", "clean")]
+    [ValidateSet("setup", "build", "rebuild", "package", "full", "clean", "conda-setup", "conda-full")]
     [string]$Stage = "full",
     [string]$AstraWhl = ""
 )
@@ -214,6 +214,77 @@ function Invoke-Clean {
 }
 
 # ============================================================
+# Stage: conda-setup — 用 conda 创建 CUDA 11 环境（兼容旧驱动）
+# ============================================================
+function Invoke-CondaSetup {
+    Write-Host "`n[CondaSetup] Creating conda environment for CUDA 11 build..." -ForegroundColor Yellow
+
+    $condaCmd = Get-Command conda -ErrorAction SilentlyContinue
+    if (-not $condaCmd) {
+        Write-Error "conda not found. Install Miniconda: https://docs.conda.io/en/latest/miniconda.html"
+        exit 1
+    }
+
+    $CondaEnvName = "pyct-cuda11"
+
+    Write-Host " Removing old conda env if exists..."
+    & conda env remove -n $CondaEnvName -y 2>&1 | Out-Null
+
+    Write-Host " Creating conda env $CondaEnvName with Python 3.11..."
+    & conda create -n $CondaEnvName python=3.11 -y
+    if ($LASTEXITCODE -ne 0) { Write-Error "conda create failed"; exit 1 }
+
+    $CondaEnvPath = (& conda run -n $CondaEnvName python -c "import sys; print(sys.executable)").Trim()
+    Write-Host " Conda env python: $CondaEnvPath" -ForegroundColor Green
+
+    Write-Host " Installing astra-toolbox (CUDA 11)..."
+    & conda run -n $CondaEnvName conda install -c astra-toolbox -c nvidia astra-toolbox "cuda-version=11" -y
+    if ($LASTEXITCODE -ne 0) { Write-Error "astra install failed"; exit 1 }
+
+    Write-Host " Installing Python dependencies..."
+    & conda run -n $CondaEnvName pip install -r "$RepoRoot\requirements_qt.txt"
+    & conda run -n $CondaEnvName pip install pyinstaller
+
+    Write-Host "`n --- Environment ---" -ForegroundColor Cyan
+    & conda run -n $CondaEnvName python -c "import astra; print(f'  ASTRA: {astra.__version__}'); print(f'  CUDA: {astra.use_cuda()}')"
+    & conda run -n $CondaEnvName python -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')"
+    Write-Host " --------------------" -ForegroundColor Cyan
+
+    $CondaEnvPath | Out-File -Encoding utf8 "$RepoRoot\.conda_python_path.txt"
+    Write-Host "[CondaSetup] Done. Python path saved to .conda_python_path.txt" -ForegroundColor Green
+}
+
+# ============================================================
+# Stage: conda-build — 用 conda 环境的 PyInstaller 构建
+# ============================================================
+function Invoke-CondaBuild {
+    $condaPythonFile = "$RepoRoot\.conda_python_path.txt"
+    if (-not (Test-Path $condaPythonFile)) {
+        Write-Error ".conda_python_path.txt not found. Run 'just conda-setup' first."
+        exit 1
+    }
+    $CondaPython = (Get-Content $condaPythonFile).Trim()
+    $CondaPyInstaller = Join-Path (Split-Path $CondaPython) "pyinstaller.exe"
+
+    Write-Host "`n[CondaBuild] Running PyInstaller from conda env..." -ForegroundColor Yellow
+    Write-Host " Python: $CondaPython"
+
+    if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
+
+    & $CondaPyInstaller `
+        --noconfirm `
+        --distpath "$BuildDir\dist" `
+        --workpath "$BuildDir\work" `
+        "$RepoRoot\scripts\pyct.spec"
+
+    if (-not (Test-Path "$DistDir\PyCT.exe")) {
+        Write-Error "PyInstaller failed: PyCT.exe not found"
+        exit 1
+    }
+    Write-Host "[CondaBuild] Done: $DistDir\PyCT.exe" -ForegroundColor Green
+}
+
+# ============================================================
 # Internal helpers
 # ============================================================
 function Assert-Venv {
@@ -245,12 +316,14 @@ function Invoke-PyInstaller {
 # Dispatch
 # ============================================================
 switch ($Stage) {
-    "setup"   { Invoke-Setup }
-    "build"   { Invoke-Build }
-    "rebuild" { Invoke-Rebuild }
-    "package" { Invoke-Package }
-    "full"    { Invoke-Setup; Invoke-Build; Invoke-Package }
-    "clean"   { Invoke-Clean }
+    "setup"       { Invoke-Setup }
+    "build"       { Invoke-Build }
+    "rebuild"     { Invoke-Rebuild }
+    "package"     { Invoke-Package }
+    "full"        { Invoke-Setup; Invoke-Build; Invoke-Package }
+    "clean"       { Invoke-Clean }
+    "conda-setup" { Invoke-CondaSetup }
+    "conda-full"  { Invoke-CondaSetup; Invoke-CondaBuild; Invoke-Package }
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan

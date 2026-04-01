@@ -133,3 +133,43 @@ def ensure_cwd_for_develop():
         base = get_base_path()
         if os.path.isdir(base):
             os.chdir(base)
+
+
+def get_base_exe_dir() -> str:
+    """
+    返回可执行文件所在目录。
+    frozen 模式返回 sys.executable 的目录，否则返回项目根目录。
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def find_py34() -> str:
+    """
+    按优先级查找 Python 3.4 可执行文件路径：
+    1. 捆绑在 exe 旁边的 detector_bridge/py34/python.exe
+    2. 环境变量 py34
+
+    返回路径字符串，找不到返回空字符串。
+    """
+    # 方式 1：exe 同级目录（PyInstaller frozen）
+    exe_dir = get_base_exe_dir()
+    bundled = os.path.join(exe_dir, "detector_bridge", "py34", "python.exe")
+    if os.path.isfile(bundled):
+        return bundled
+
+    # 方式 2：环境变量
+    env_py34 = os.environ.get("py34", "")
+    if env_py34 and os.path.isfile(env_py34):
+        return env_py34
+
+    return ""
+
+
+def get_detector_bridge_dir() -> str:
+    """
+    返回 detector_bridge 目录路径。
+    detector.py 放在这里。
+    """
+    return os.path.join(get_base_exe_dir(), "detector_bridge")

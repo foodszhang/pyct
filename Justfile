@@ -29,3 +29,11 @@ full:
 # 清理所有构建产物
 clean:
     powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage clean
+
+# 用 conda + CUDA 11 创建打包环境（兼容旧驱动 465）
+conda-setup:
+    powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-setup
+
+# conda 环境完整打包
+conda-full:
+    powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-full

@@ -74,6 +74,7 @@ ni*.raw
 # output
 .python_build/
 .venv_build/
+.conda_python_path.txt
 build_output/
 .python_build_setup.exe
 astra_pkg/

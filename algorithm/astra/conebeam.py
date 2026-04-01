@@ -333,40 +333,29 @@ class ConeBeam:
         use_cuda = _cuda_available()
         _ckpt(f"CUDA available: {use_cuda}")
 
-        try:
-            if use_cuda:
-                _ckpt("FDK_CUDA path start")
-                cfg_fdk = ast.astra_dict("FDK_CUDA")
-                cfg_fdk["ProjectionDataId"] = self.proj_id
-                cfg_fdk["ReconstructionDataId"] = self.rec_id
-                _ckpt("FDK_CUDA algorithm create start")
-                alg_id = ast.algorithm.create(cfg_fdk)
-                _ckpt("FDK_CUDA algorithm run start")
-                ast.algorithm.run(alg_id, 1)
-                _ckpt("FDK_CUDA get result start")
-                rec_gpu = ast.data3d.get(self.rec_id)
-                ar = rec_gpu[:]
-                ast.algorithm.delete(alg_id)
-                _ckpt("FDK_CUDA done")
-                print("[Reconstruction] 使用 FDK_CUDA 重建完成")
-            else:
-                _ckpt("CPU FDK path start")
-                cfg_cpu = ast.astra_dict("FDK")
-                cfg_cpu["ProjectionDataId"] = self.proj_id
-                cfg_cpu["ReconstructionDataId"] = self.rec_id
-                _ckpt("CPU FDK algorithm create start")
-                alg_id = ast.algorithm.create(cfg_cpu)
-                _ckpt("CPU FDK algorithm run start")
-                ast.algorithm.run(alg_id, 1)
-                _ckpt("CPU FDK get result start")
-                rec_cpu = ast.data3d.get(self.rec_id)
-                ar = rec_cpu[:]
-                ast.algorithm.delete(alg_id)
-                _ckpt("CPU FDK done")
-                print("[Reconstruction] 使用 FDK (CPU) 重建完成")
-        except Exception as e:
-            _ckpt(f"Reconstruction exception: {type(e).__name__}: {e}")
-            raise
+        if not use_cuda:
+            raise RuntimeError(
+                "GPU不可用：astra.use_cuda()返回False。\n"
+                "请检查：\n"
+                "1. 显卡驱动已正确安装（RTX 2080 Ti 需要 ≥ 465.89）\n"
+                "2. CUDA toolkit 与驱动版本匹配\n"
+                "3. astra.test() 输出的报错信息"
+            )
+
+        _ckpt("FDK_CUDA path start")
+        cfg_fdk = ast.astra_dict("FDK_CUDA")
+        cfg_fdk["ProjectionDataId"] = self.proj_id
+        cfg_fdk["ReconstructionDataId"] = self.rec_id
+        _ckpt("FDK_CUDA algorithm create start")
+        alg_id = ast.algorithm.create(cfg_fdk)
+        _ckpt("FDK_CUDA algorithm run start")
+        ast.algorithm.run(alg_id, 1)
+        _ckpt("FDK_CUDA get result start")
+        rec_gpu = ast.data3d.get(self.rec_id)
+        ar = rec_gpu[:]
+        ast.algorithm.delete(alg_id)
+        _ckpt("FDK_CUDA done")
+        print("[Reconstruction] 使用 FDK_CUDA 重建完成")
 
         finally:
             ast.data3d.delete(self.rec_id)
