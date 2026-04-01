@@ -11,7 +11,7 @@
 # ============================================================
 
 param(
-    [ValidateSet("setup", "build", "rebuild", "package", "full", "clean", "conda-setup", "conda-build", "conda-full", "conda-fix")]
+    [ValidateSet("setup", "build", "rebuild", "package", "full", "clean", "conda-setup", "conda-build", "conda-full", "conda-fix", "conda-package")]
     [string]$Stage = "full",
     [string]$AstraWhl = ""
 )
@@ -23,7 +23,12 @@ $RepoRoot       = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand
 Set-Location $RepoRoot
 $Version        = "1.0.0"
 $BuildDir       = "$RepoRoot\build_output"
-$DistDir        = "$BuildDir\dist\PyCT"
+# uv 路线（CUDA 12 / 新驱动）
+$UvDistBase     = "$BuildDir\dist_uv"
+$UvDistDir      = "$UvDistBase\PyCT"
+# conda 路线（CUDA 11 / 旧驱动）
+$CondaDistBase  = "$BuildDir\dist_conda"
+$CondaDistDir   = "$CondaDistBase\PyCT"
 $VenvDir        = "$RepoRoot\.venv_build"
 $VenvPython     = "$VenvDir\Scripts\python.exe"
 $VenvPyInstaller = "$VenvDir\Scripts\pyinstaller.exe"
@@ -108,9 +113,10 @@ function Invoke-Setup {
 function Invoke-Build {
     Assert-Venv
     Write-Host "`n[Build] Running PyInstaller (clean)..." -ForegroundColor Yellow
-    if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
+    if (Test-Path $UvDistBase) { Remove-Item -Recurse -Force $UvDistBase }
+    if (Test-Path "$BuildDir\work_uv") { Remove-Item -Recurse -Force "$BuildDir\work_uv" }
     Invoke-PyInstaller
-    Write-Host "[Build] Done: $DistDir\PyCT.exe" -ForegroundColor Green
+    Write-Host "[Build] Done: $UvDistDir\PyCT.exe" -ForegroundColor Green
 }
 
 # ============================================================
@@ -120,26 +126,40 @@ function Invoke-Rebuild {
     Assert-Venv
     Write-Host "`n[Rebuild] Running PyInstaller (incremental)..." -ForegroundColor Yellow
     Invoke-PyInstaller
-    Write-Host "[Rebuild] Done: $DistDir\PyCT.exe" -ForegroundColor Green
+    Write-Host "[Rebuild] Done: $UvDistDir\PyCT.exe" -ForegroundColor Green
 }
 
 # ============================================================
 # Stage: package — 组装便携目录 + zip
 # ============================================================
 function Invoke-Package {
-    # 兼容 onedir（默认）和 onefile 两种 spec 模式
-    if (-not (Test-Path "$DistDir\PyCT\PyCT.exe") -and -not (Test-Path "$DistDir\PyCT.exe")) {
-        Write-Error "PyCT.exe not found. Run 'just build' or 'just conda-build' first."
+    param(
+        [ValidateSet("uv", "conda")]
+        [string]$Variant = "uv"
+    )
+
+    if ($Variant -eq "conda") {
+        $PackDistDir = $CondaDistDir
+        $ZipSuffix   = "cuda11"
+    } else {
+        $PackDistDir = $UvDistDir
+        $ZipSuffix   = "cuda12"
+    }
+
+    # 兼容 onedir 和 onefile 两种 spec 模式
+    $onefilePath = "$PackDistDir\..\PyCT.exe"
+    if (-not (Test-Path "$PackDistDir\PyCT.exe") -and -not (Test-Path $onefilePath)) {
+        Write-Error "PyCT.exe not found in $PackDistDir. Run build first."
         exit 1
     }
-    Write-Host "`n[Package] Assembling portable directory..." -ForegroundColor Yellow
+    Write-Host "`n[Package] Assembling portable directory ($ZipSuffix)..." -ForegroundColor Yellow
 
     # config
-    if (-not (Test-Path "$DistDir\config")) { New-Item -ItemType Directory "$DistDir\config" | Out-Null }
-    Copy-Item "$RepoRoot\config.yaml" "$DistDir\config\default_config.yaml" -Force
+    if (-not (Test-Path "$PackDistDir\config")) { New-Item -ItemType Directory "$PackDistDir\config" | Out-Null }
+    Copy-Item "$RepoRoot\config.yaml" "$PackDistDir\config\default_config.yaml" -Force
 
     # detector_bridge + py34
-    $DetBridge = "$DistDir\detector_bridge"
+    $DetBridge = "$PackDistDir\detector_bridge"
     if (-not (Test-Path $DetBridge)) { New-Item -ItemType Directory $DetBridge | Out-Null }
     Copy-Item "$RepoRoot\detector.py" "$DetBridge\detector.py" -Force -ErrorAction SilentlyContinue
 
@@ -174,15 +194,15 @@ function Invoke-Package {
     # vc_redist
     $VcRedist = Get-ChildItem "$RepoRoot\astra_pkg" -Recurse -Filter "vc_redist.x64.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($VcRedist) {
-        if (-not (Test-Path "$DistDir\redist")) { New-Item -ItemType Directory "$DistDir\redist" | Out-Null }
-        Copy-Item $VcRedist.FullName "$DistDir\redist\vc_redist.x64.exe" -Force
+        if (-not (Test-Path "$PackDistDir\redist")) { New-Item -ItemType Directory "$PackDistDir\redist" | Out-Null }
+        Copy-Item $VcRedist.FullName "$PackDistDir\redist\vc_redist.x64.exe" -Force
         Write-Host "  vc_redist.x64.exe copied" -ForegroundColor Green
     }
 
     # docs
-    if (-not (Test-Path "$DistDir\docs")) { New-Item -ItemType Directory "$DistDir\docs" | Out-Null }
+    if (-not (Test-Path "$PackDistDir\docs")) { New-Item -ItemType Directory "$PackDistDir\docs" | Out-Null }
     if (Test-Path "$RepoRoot\scripts\Offline_Install_Guide.md") {
-        Copy-Item "$RepoRoot\scripts\Offline_Install_Guide.md" "$DistDir\docs\" -Force
+        Copy-Item "$RepoRoot\scripts\Offline_Install_Guide.md" "$PackDistDir\docs\" -Force
     }
 
     # README
@@ -197,9 +217,9 @@ Without py34, calibration and reconstruction still work (offline mode).
 
     # zip
     Write-Host "`n[Package] Creating portable zip..." -ForegroundColor Yellow
-    $ZipPath = "$BuildDir\PyCT_Portable_$Version.zip"
+    $ZipPath = "$BuildDir\PyCT_Portable_${Version}_${ZipSuffix}.zip"
     if (Test-Path $ZipPath) { Remove-Item $ZipPath }
-    Compress-Archive -Path "$DistDir\*" -DestinationPath $ZipPath
+    Compress-Archive -Path "$PackDistDir\*" -DestinationPath $ZipPath
     $zipSize = [math]::Round((Get-Item $ZipPath).Length / 1MB, 1)
     Write-Host "[Package] Done: $ZipPath ($zipSize MB)" -ForegroundColor Green
 }
@@ -314,25 +334,26 @@ function Invoke-CondaBuild {
     $env:PATH = "$CondaEnvPath\Library\bin;$CondaEnvPath\Scripts;$CondaEnvPath;$env:PATH"
     Write-Host "  PYTHONNOUSERSITE=1, PATH prepended with conda env dirs" -ForegroundColor Green
 
-    if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
+    if (Test-Path $CondaDistBase) { Remove-Item -Recurse -Force $CondaDistBase }
+    if (Test-Path "$BuildDir\work_conda") { Remove-Item -Recurse -Force "$BuildDir\work_conda" }
 
     & $CondaPyInstaller `
         --noconfirm `
-        --distpath "$BuildDir\dist" `
-        --workpath "$BuildDir\work" `
+        --distpath $CondaDistBase `
+        --workpath "$BuildDir\work_conda" `
         "$RepoRoot\scripts\pyct.spec"
 
     Write-Host "[CondaBuild] dist contents:"
-    Get-ChildItem "$DistDir" -ErrorAction SilentlyContinue | Select-Object Name
+    Get-ChildItem $CondaDistBase -ErrorAction SilentlyContinue | Select-Object Name
 
     # 兼容 onedir（默认）和 onefile 两种 spec 模式
     $exePath = ""
-    if (Test-Path "$DistDir\PyCT\PyCT.exe") {
-        $exePath = "$DistDir\PyCT\PyCT.exe"
-    } elseif (Test-Path "$DistDir\PyCT.exe") {
-        $exePath = "$DistDir\PyCT.exe"
+    if (Test-Path "$CondaDistDir\PyCT.exe") {
+        $exePath = "$CondaDistDir\PyCT.exe"
+    } elseif (Test-Path "$CondaDistBase\PyCT.exe") {
+        $exePath = "$CondaDistBase\PyCT.exe"
     } else {
-        Write-Error "PyInstaller failed: PyCT.exe not found in $DistDir"
+        Write-Error "PyInstaller failed: PyCT.exe not found in $CondaDistBase"
         exit 1
     }
     Write-Host "[CondaBuild] Done: $exePath" -ForegroundColor Green
@@ -430,11 +451,11 @@ function Assert-Venv {
 function Invoke-PyInstaller {
     & $VenvPyInstaller `
         --noconfirm `
-        --distpath "$BuildDir\dist" `
-        --workpath "$BuildDir\work" `
+        --distpath $UvDistBase `
+        --workpath "$BuildDir\work_uv" `
         "$RepoRoot\scripts\pyct.spec"
 
-    if (-not (Test-Path "$DistDir\PyCT.exe")) {
+    if (-not (Test-Path "$UvDistDir\PyCT.exe")) {
         Write-Error "PyInstaller failed: PyCT.exe not found"
         exit 1
     }
@@ -447,13 +468,14 @@ switch ($Stage) {
     "setup"       { Invoke-Setup }
     "build"       { Invoke-Build }
     "rebuild"     { Invoke-Rebuild }
-    "package"     { Invoke-Package }
-    "full"        { Invoke-Setup; Invoke-Build; Invoke-Package }
+    "package"     { Invoke-Package -Variant "uv" }
+    "full"        { Invoke-Setup; Invoke-Build; Invoke-Package -Variant "uv" }
     "clean"       { Invoke-Clean }
     "conda-setup" { Invoke-CondaSetup }
     "conda-fix"   { Invoke-CondaFix }
     "conda-build" { Invoke-CondaBuild }
-    "conda-full"  { Invoke-CondaSetup; Invoke-CondaBuild; Invoke-Package }
+    "conda-full"  { Invoke-CondaSetup; Invoke-CondaBuild; Invoke-Package -Variant "conda" }
+    "conda-package" { Invoke-Package -Variant "conda" }
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan

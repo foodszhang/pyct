@@ -45,3 +45,7 @@ conda-fix:
 # conda-setup + conda-build + package
 conda-full:
     powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-full
+
+# 在已有 conda dist 基础上组装便携目录 + zip（CUDA 11 版本）
+conda-package:
+    powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-package
