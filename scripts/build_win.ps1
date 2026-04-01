@@ -300,16 +300,20 @@ function Invoke-CondaBuild {
         exit 1
     }
     $CondaPython = (Get-Content $condaPythonFile).Trim()
-    $CondaPyInstaller = Join-Path (Split-Path $CondaPython) "Scripts\pyinstaller.exe"
+    $CondaEnvPath = Split-Path $CondaPython
+    $CondaPyInstaller = Join-Path $CondaEnvPath "Scripts\pyinstaller.exe"
 
     if (-not (Test-Path $CondaPyInstaller)) {
         Write-Error "PyInstaller not found at $CondaPyInstaller. Run 'just conda-setup' or 'just conda-fix' first."
         exit 1
     }
+    Write-Host "  Python:      $CondaPython" -ForegroundColor Green
+    Write-Host "  PyInstaller: $CondaPyInstaller" -ForegroundColor Green
 
-    Write-Host "`n[CondaBuild] Running PyInstaller from conda env..." -ForegroundColor Yellow
-    Write-Host " Python:   $CondaPython" -ForegroundColor Green
-    Write-Host " PyInstaller: $CondaPyInstaller" -ForegroundColor Green
+    # 将 conda 环境的 Library\bin 和 Scripts 加入 PATH
+    # 这样 PyInstaller 子进程能找到 CUDA DLL（cudart、cublas 等）
+    $env:PATH = "$CondaEnvPath\Library\bin;$CondaEnvPath\Scripts;$CondaEnvPath;$env:PATH"
+    Write-Host "  PATH prepended with conda env dirs" -ForegroundColor Green
 
     if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
 
