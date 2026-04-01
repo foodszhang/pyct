@@ -132,6 +132,7 @@ class ReconWorker(QThread):
     progress = Signal(int, str)
     finished = Signal(object)
     error = Signal(str)
+    cuda_used = Signal(bool)
 
     def __init__(self, params, parent_window):
         super().__init__()
@@ -139,6 +140,9 @@ class ReconWorker(QThread):
         self.parent_window = parent_window
 
     def run(self):
+        import traceback, pathlib, datetime
+
+        log_path = pathlib.Path.home() / "pyct_crash.log"
         p = self.params
         try:
             cb = ConeBeam(
@@ -181,7 +185,8 @@ class ReconWorker(QThread):
                 )
             self.progress.emit(65, "构建几何...")
             self.progress.emit(80, "FDK 重建中...")
-            rec = cb.reconstruct()
+            rec, use_cuda = cb.reconstruct()
+            self.cuda_used.emit(use_cuda)
             self.progress.emit(95, "保存结果...")
             nii_img = nib.Nifti1Image(rec, np.eye(4))
             try:
@@ -195,7 +200,11 @@ class ReconWorker(QThread):
             self.progress.emit(100, "完成")
             self.finished.emit(rec)
         except Exception as e:
-            self.error.emit(str(e))
+            msg = f"\n[{datetime.datetime.now()}] CRASH in ReconWorker:\n"
+            msg += traceback.format_exc()
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(msg)
+            self.error.emit(f"重建崩溃，详情见 {log_path}:\n{e}")
 
 
 class ReconstrcionDialog(QtWidgets.QDialog):

@@ -2,9 +2,26 @@ import cv2
 import numpy as np
 import astra as ast
 import os
+import pathlib
+import datetime
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
-import sys
+
+
+def _ckpt(msg: str):
+    """写入检查点日志"""
+    log_path = pathlib.Path.home() / "pyct_crash.log"
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(f"[{datetime.datetime.now()}] {msg}\n")
+
+
+def _cuda_available() -> bool:
+    """检测 ASTRA CUDA 是否可用"""
+    try:
+        info = ast.astra.get_gpu_info()
+        return bool(info)
+    except Exception:
+        return False
 
 
 class ConeBeam:
@@ -313,47 +330,47 @@ class ConeBeam:
         print(f"[Preprocess] data mean = {self.data.mean():.6f}")
 
     def reconstruct(self):
-        rec_gpu = None
-        cuda_used = False
+        use_cuda = _cuda_available()
+        _ckpt(f"CUDA available: {use_cuda}")
+
         try:
-            cfg_fdk = ast.astra_dict("FDK_CUDA")
-            cfg_fdk["ProjectionDataId"] = self.proj_id
-            cfg_fdk["ReconstructionDataId"] = self.rec_id
-            alg_id = ast.algorithm.create(cfg_fdk)
-            ast.algorithm.run(alg_id, 1)
-            rec_gpu = ast.data3d.get(self.rec_id)
-            ar = rec_gpu[:]
-            ast.algorithm.delete(alg_id)
-            cuda_used = True
-        except Exception as e:
-            cuda_err = f"{type(e).__name__}: {str(e)}"
-            print(
-                f"[Warn] CUDA 不可用（{cuda_err[:80]}），降级为 CPU 重建（速度会变慢）"
-            )
-            try:
+            if use_cuda:
+                _ckpt("FDK_CUDA path start")
+                cfg_fdk = ast.astra_dict("FDK_CUDA")
+                cfg_fdk["ProjectionDataId"] = self.proj_id
+                cfg_fdk["ReconstructionDataId"] = self.rec_id
+                _ckpt("FDK_CUDA algorithm create start")
+                alg_id = ast.algorithm.create(cfg_fdk)
+                _ckpt("FDK_CUDA algorithm run start")
+                ast.algorithm.run(alg_id, 1)
+                _ckpt("FDK_CUDA get result start")
+                rec_gpu = ast.data3d.get(self.rec_id)
+                ar = rec_gpu[:]
+                ast.algorithm.delete(alg_id)
+                _ckpt("FDK_CUDA done")
+                print("[Reconstruction] 使用 FDK_CUDA 重建完成")
+            else:
+                _ckpt("CPU FDK path start")
                 cfg_cpu = ast.astra_dict("FDK")
                 cfg_cpu["ProjectionDataId"] = self.proj_id
                 cfg_cpu["ReconstructionDataId"] = self.rec_id
+                _ckpt("CPU FDK algorithm create start")
                 alg_id = ast.algorithm.create(cfg_cpu)
+                _ckpt("CPU FDK algorithm run start")
                 ast.algorithm.run(alg_id, 1)
+                _ckpt("CPU FDK get result start")
                 rec_cpu = ast.data3d.get(self.rec_id)
                 ar = rec_cpu[:]
                 ast.algorithm.delete(alg_id)
-            except Exception as e2:
-                cpu_err = f"{type(e2).__name__}: {str(e2)}"
-                print(f"[Error] CPU 重建也失败：{cpu_err[:80]}")
-                print(f"[Error] 请检查 ASTRA 是否正确安装，或确认有可用重建算法。")
-                raise RuntimeError(
-                    f"Both CUDA and CPU FDK reconstruction failed: {cpu_err}"
-                )
+                _ckpt("CPU FDK done")
+                print("[Reconstruction] 使用 FDK (CPU) 重建完成")
+        except Exception as e:
+            _ckpt(f"Reconstruction exception: {type(e).__name__}: {e}")
+            raise
+
         finally:
             ast.data3d.delete(self.rec_id)
             ast.data3d.delete(self.proj_id)
-
-        if cuda_used:
-            print("[Reconstruction] 使用 FDK_CUDA 重建完成")
-        else:
-            print("[Reconstruction] 使用 FDK (CPU) 重建完成")
 
         if self.use_hu:
             print("[HU] useHu=True was requested, but HU conversion is disabled")
@@ -361,7 +378,7 @@ class ConeBeam:
         print(f"[Reconstruction] min = {ar.min():.6f}")
         print(f"[Reconstruction] max = {ar.max():.6f}")
         print(f"[Reconstruction] mean = {ar.mean():.6f}")
-        return ar
+        return ar, use_cuda
 
 
 if __name__ == "__main__":

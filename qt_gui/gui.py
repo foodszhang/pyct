@@ -602,17 +602,34 @@ class MainWindow(QtWidgets.QMainWindow):
         self.recon_progress_bar.show()
         self.recon_stage_label.show()
         self.recon_progress_bar.setValue(0)
+        self._cuda_used = None
         self.recon_stage_label.setText("准备中...")
 
         self.recon_worker = rec.ReconWorker(params, self)
         self.recon_worker.progress.connect(self._on_recon_progress)
         self.recon_worker.finished.connect(self._on_recon_finished)
         self.recon_worker.error.connect(self._on_recon_error)
+        self.recon_worker.cuda_used.connect(self._on_cuda_used)
         self.recon_worker.start()
 
     def _on_recon_progress(self, percent, stage_name):
         self.recon_progress_bar.setValue(percent)
-        self.recon_stage_label.setText(stage_name)
+        suffix = ""
+        if self._cuda_used is True:
+            suffix = " [GPU]"
+        elif self._cuda_used is False:
+            suffix = " [CPU]"
+        self.recon_stage_label.setText(stage_name + suffix)
+
+    def _on_cuda_used(self, used: bool):
+        self._cuda_used = used
+        current = self.recon_stage_label.text()
+        suffix = " [GPU]" if used else " [CPU]"
+        for s in (" [GPU]", " [CPU]"):
+            if current.endswith(s):
+                current = current[: -len(s)]
+                break
+        self.recon_stage_label.setText(current + suffix)
 
     def _on_recon_finished(self, rec):
         self.recon_progress_bar.setStyleSheet(
