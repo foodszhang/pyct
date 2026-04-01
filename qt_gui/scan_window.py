@@ -14,7 +14,26 @@ from concurrent.futures import ThreadPoolExecutor
 import yaml
 from serial_controller import ZolixMcController
 import time
+import queue, threading
 from utils.paths import get_config_path, get_ui_path
+
+
+def _readline_with_timeout(stream, timeout=15):
+    """从流中读取一行，支持超时（Windows 兼容）"""
+    q = queue.Queue()
+
+    def _reader():
+        try:
+            q.put(stream.readline())
+        except Exception:
+            q.put(b"")
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+    try:
+        return q.get(timeout=timeout)
+    except queue.Empty:
+        return None
 
 loader = QUiLoader()
 Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
@@ -23,6 +42,7 @@ Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 class ScanWindow(QtWidgets.QDialog):
     ImageChanged = QtCore.Signal(np.ndarray)
     ProgressBarChanged = QtCore.Signal(int, str)
+    error = QtCore.Signal(str)
 
     def __init__(self, parent_window, parent=None):
         super().__init__()
@@ -91,133 +111,127 @@ class ScanWindow(QtWidgets.QDialog):
         img = (img * 65535).astype(np.uint16)
         cv2.imwrite(full_filename, img)
 
+    def _unfreeze_ui(self):
+        """通过 signal 通知主线程解冻 UI"""
+        self.ProgressBarChanged.emit(-1, "error")
+
     def scan_thread(self):
-        config = Config.get("ZolixMcController", None)
-        if not config:
-            QtWidgets.QMessageBox.critical(
-                self, "警告", "转台控制器配置出错!请检查config.yaml文件"
-            )
-            return
-        controller = ZolixMcController(config["port"], config["baudrate"])
-        server_thread = Thread(
-            target=pipe.detector_server,
-            args=(r"\\.\pipe\detectResult", b"ctRestruct", self.detector_receive),
-            daemon=True,
-        )
-        server_thread.start()
-        py34 = os.environ.get("py34", "")
-        if not py34:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "警告",
-                "py34环境变量未配置!请检查系统环境变量, 保证py34环境变量指向3.4版本python.exe的路径",
-            )
-            return
+        try:
+            config = Config.get("ZolixMcController", None)
+            if not config:
+                self.error.emit("转台控制器配置出错!请检查config.yaml文件")
+                self._unfreeze_ui()
+                return
+            controller = ZolixMcController(config["port"], config["baudrate"])
 
-        # seq exposeTime gapTime number
-        # 转盘速度与探测器时间 从设置上相互独立
-        # 但是为了最终效果需要一定等式
-        # 拍摄张数 * (曝光时间 + 间隔时间) = 360 / 转盘速度
-        # 采集间隔度数 = 360 / 采集图片数 = 转速 * (曝光时间+间隔时间)
-        # 转速2, 曝光时间100ms, 间隔时间400ms
-        # 转速4 曝光时间100ms, 间隔时间150ms
-        # 转速5 曝光时间100ms, 间隔时间100ms
-        speed = int(self.rotation_speed_line_edit.text().strip())
-        controller.set_speed(speed)
-        controller.set_init_speed(speed)
-        xray_controller = self.parent_window.xray_controller
-        xray_controller.xray_on()
-        time_out = 20
-        t = 0
-
-        while True:
-            if (
-                abs(
-                    self.parent_window.xray_current
-                    - float(self.parent_window.current_line_edit.text().strip())
-                )
-                < 1
-                and abs(
-                    self.parent_window.xray_voltage
-                    - float(self.parent_window.voltage_line_edit.text().strip())
-                )
-                < 1
-            ):
-                break
-            time.sleep(0.5)
-            t += 0.5
-            if t > time_out:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "警告",
-                    "x射线管启动失败, 请检查x射线管控制器是否连接正常",
-                )
+            py34 = os.environ.get("py34", "")
+            if not py34:
+                self.error.emit("py34环境变量未配置!请检查系统环境变量")
+                self._unfreeze_ui()
                 return
 
-        sub = subprocess.Popen(
-            [
-                py34,
-                "detector.py",
-                "seq",
-                self.expose_time_line_edit.text().strip(),
-                self.gap_time_line_edit.text().strip(),
-                self.number_line_edit.text().strip(),
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-        )
-        # sub = subprocess.Popen(
-        #    [
-        #        py34,
-        #        "detector.py",
-        #        "seq",
-        #        '100',
-        #        '150',
-        #        '60',
-        #    ],
-        #    stdin=subprocess.PIPE,
-        #    stdout=subprocess.PIPE,
-        # )
-        assert sub.stdout
-        assert sub.stdin
-        if self.dark_line_edit.text().strip():
-            dark_path = os.path.join(
-                self.parent_window.project_path, self.dark_line_edit.text().strip()
+            server_thread = Thread(
+                target=pipe.detector_server,
+                args=(r"\\.\pipe\detectResult", b"ctRestruct", self.detector_receive),
+                daemon=True,
             )
-            if os.path.exists(dark_path):
-                self.dark_img = cv2.imread(dark_path, -1)
-        else:
-            self.dark_img = None
-        if self.empty_line_edit.text().strip():
-            empty_path = os.path.join(
-                self.parent_window.project_path, self.empty_line_edit.text().strip()
+            server_thread.start()
+
+            # seq exposeTime gapTime number
+            speed = int(self.rotation_speed_line_edit.text().strip())
+            controller.set_speed(speed)
+            controller.set_init_speed(speed)
+            xray_controller = self.parent_window.xray_controller
+            xray_controller.xray_on()
+            time_out = 20
+            t = 0
+
+            while True:
+                if (
+                    abs(
+                        self.parent_window.xray_current
+                        - float(self.parent_window.current_line_edit.text().strip())
+                    )
+                    < 1
+                    and abs(
+                        self.parent_window.xray_voltage
+                        - float(self.parent_window.voltage_line_edit.text().strip())
+                    )
+                    < 1
+                ):
+                    break
+                time.sleep(0.5)
+                t += 0.5
+                if t > time_out:
+                    self.error.emit("x射线管启动失败，请检查x射线管控制器是否连接正常")
+                    self._unfreeze_ui()
+                    return
+
+            sub = subprocess.Popen(
+                [
+                    py34,
+                    "detector.py",
+                    "seq",
+                    self.expose_time_line_edit.text().strip(),
+                    self.gap_time_line_edit.text().strip(),
+                    self.number_line_edit.text().strip(),
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
             )
-            if os.path.exists(empty_path):
-                self.empty_img = cv2.imread(empty_path, -1)
-        else:
-            self.empty_img = None
+            assert sub.stdout
+            assert sub.stdin
 
-        ready_cmd = sub.stdout.readline()
+            if self.dark_line_edit.text().strip():
+                dark_path = os.path.join(
+                    self.parent_window.project_path, self.dark_line_edit.text().strip()
+                )
+                if os.path.exists(dark_path):
+                    self.dark_img = cv2.imread(dark_path, -1)
+            else:
+                self.dark_img = None
+            if self.empty_line_edit.text().strip():
+                empty_path = os.path.join(
+                    self.parent_window.project_path, self.empty_line_edit.text().strip()
+                )
+                if os.path.exists(empty_path):
+                    self.empty_img = cv2.imread(empty_path, -1)
+            else:
+                self.empty_img = None
 
-        self.ProgressBarChanged.emit(20, "采集中")
-        if not ready_cmd.startswith(b"READY"):
-            print("ready_cmd333", ready_cmd)
-            sys.exit(1)
-        sub.stdin.write("start\n".encode())
-        sub.stdin.flush()
-        # 这里稍微多转一会
-        controller.motion_rotation(380)
-        # controller.motion_rotation(70)
-        cmd = sub.stdout.readline()
-        print("77777", cmd)
-        for fut in self.fut_list:
-            fut.result()
-        self.ProgressBarChanged.emit(100, "采集完成")
-        self.parent_window.tab_widget.setEnabled(True)
-        xray_controller.xray_off()
+            ready_cmd = _readline_with_timeout(sub.stdout, timeout=15)
+            self.ProgressBarChanged.emit(20, "采集中")
+            if ready_cmd is None:
+                self.error.emit("探测器启动超时（15s未收到READY）")
+                sub.kill()
+                self._unfreeze_ui()
+                return
+            if not ready_cmd.startswith(b"READY"):
+                self.error.emit(f"探测器握手失败，收到: {ready_cmd!r}")
+                sub.kill()
+                self._unfreeze_ui()
+                return
+            sub.stdin.write("start\n".encode())
+            sub.stdin.flush()
+            controller.motion_rotation(380)
+            cmd = sub.stdout.readline()
+            print("77777", cmd)
+            for fut in self.fut_list:
+                fut.result()
+            self.ProgressBarChanged.emit(100, "采集完成")
+        except Exception as e:
+            import traceback
+
+            print(f"[Error] scan_thread crash: {traceback.format_exc()}")
+            self.error.emit(str(e))
+        finally:
+            self._unfreeze_ui()
+            try:
+                self.parent_window.xray_off()
+            except Exception:
+                pass
 
     def button_start(self):
-        # self.parent_window.ct_scan_progress.setValue(0)
         self.parent_window.ct_scan_progress_bar.setValue(0)
         self.parent_window.ct_scan_progress_label.setText("初始化中")
         self.parent_window.tab_widget.setEnabled(False)

@@ -136,6 +136,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.empty_snap_window.ProgressBarChanged.connect(self.update_progress_bar)
         self.scan_window.ImageChanged.connect(self.update_scan_view)
         self.scan_window.ProgressBarChanged.connect(self.update_progress_bar)
+        self.scan_window.error.connect(self._on_scan_error)
+        self.dark_snap_window.error.connect(self._on_scan_error)
+        self.empty_snap_window.error.connect(self._on_scan_error)
         self.scan_image_item = pg.ImageItem(np.zeros((800, 800)), autoLevels=True)
         self.scan_view.addItem(self.scan_image_item)
 
@@ -542,9 +545,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.reconstruction_dialog.save_config()
 
     def update_progress_bar(self, value, text):
+        if value == -1:
+            # 解冻 UI，隐藏进度条
+            self.ct_scan_progress_bar.hide()
+            self.ct_scan_progress_label.setText("")
+            self.tab_widget.setEnabled(True)
+            return
         self.ct_scan_progress_bar.setValue(value)
         if text:
             self.ct_scan_progress_label.setText(text)
+
+    def _on_scan_error(self, msg):
+        self.tab_widget.setEnabled(True)
+        self.ct_scan_progress_bar.setValue(0)
+        self.ct_scan_progress_label.setText("")
+        QtWidgets.QMessageBox.warning(self.ui, "采集失败", msg)
 
     def show_reconstruction_result(self, img: np.ndarray):
         self.tab_widget.setEnabled(True)
