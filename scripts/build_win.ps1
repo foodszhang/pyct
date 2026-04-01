@@ -226,6 +226,24 @@ function Invoke-CondaSetup {
         exit 1
     }
 
+    $mambaCmd = Get-Command mamba -ErrorAction SilentlyContinue
+    if (-not $mambaCmd) {
+        Write-Warning "mamba not found in PATH, falling back to conda (slower)."
+        Write-Warning "Consider: conda install -n base mamba -y"
+        Set-Alias -Name mamba -Value conda -Scope Script
+    } else {
+        Write-Host " mamba: $($mambaCmd.Source)" -ForegroundColor Green
+    }
+
+    # 镜像 + 超时配置（仅 base 环境，写一次即可）
+    Write-Host " Configuring conda channels and timeouts..."
+    conda config --set channel_priority flexible 2>&1 | Out-Null
+    conda config --set remote_read_timeout_secs 600 2>&1 | Out-Null
+    conda config --set remote_connect_timeout_secs 60 2>&1 | Out-Null
+    # --prepend 确保镜像优先级最高（已有则跳过）
+    conda config --prepend channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge 2>&1 | Out-Null
+    conda config --prepend channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main 2>&1 | Out-Null
+
     $CondaEnvName = "pyct-cuda11"
 
     Write-Host " Removing old conda env if exists..."
@@ -234,24 +252,24 @@ function Invoke-CondaSetup {
         & conda env remove -n $CondaEnvName -y 2>&1 | Out-Null
     }
 
-    Write-Host " Creating conda env $CondaEnvName with Python 3.11..."
-    & conda create -n $CondaEnvName python=3.11 -y
-    if ($LASTEXITCODE -ne 0) { Write-Error "conda create failed"; exit 1 }
+    Write-Host " Creating conda env $CondaEnvName with Python 3.11 (using mamba)..."
+    mamba create -n $CondaEnvName python=3.11 -y
+    if ($LASTEXITCODE -ne 0) { Write-Error "mamba create failed"; exit 1 }
 
-    $CondaEnvPath = (& conda run -n $CondaEnvName python -c "import sys; print(sys.executable)").Trim()
+    $CondaEnvPath = (conda run -n $CondaEnvName python -c "import sys; print(sys.executable)").Trim()
     Write-Host " Conda env python: $CondaEnvPath" -ForegroundColor Green
 
-    Write-Host " Installing astra-toolbox (CUDA 11)..."
-    & conda run -n $CondaEnvName conda install -c astra-toolbox -c nvidia astra-toolbox "cuda-version=11" -y
-    if ($LASTEXITCODE -ne 0) { Write-Error "astra install failed"; exit 1 }
+    Write-Host " Installing astra-toolbox (CUDA 11) (using mamba)..."
+    mamba install -n $CondaEnvName -c astra-toolbox -c nvidia astra-toolbox "cuda-version=11" -y
+    if ($LASTEXITCODE -ne 0) { Write-Error "mamba install astra failed"; exit 1 }
 
     Write-Host " Installing Python dependencies..."
-    & conda run -n $CondaEnvName pip install -r "$RepoRoot\requirements_qt.txt"
-    & conda run -n $CondaEnvName pip install pyinstaller
+    conda run -n $CondaEnvName --no-capture-output pip install -r "$RepoRoot\requirements_qt.txt"
+    conda run -n $CondaEnvName --no-capture-output pip install pyinstaller
 
     Write-Host "`n --- Environment ---" -ForegroundColor Cyan
-    & conda run -n $CondaEnvName python -c "import astra; print(f'  ASTRA: {astra.__version__}'); print(f'  CUDA: {astra.use_cuda()}')"
-    & conda run -n $CondaEnvName python -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')"
+    conda run -n $CondaEnvName python -c "import astra; print(f'  ASTRA: {astra.__version__}'); print(f'  CUDA: {astra.use_cuda()}')"
+    conda run -n $CondaEnvName python -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')"
     Write-Host " --------------------" -ForegroundColor Cyan
 
     $CondaEnvPath | Out-File -Encoding utf8 "$RepoRoot\.conda_python_path.txt"
