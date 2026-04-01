@@ -310,10 +310,9 @@ function Invoke-CondaBuild {
     Write-Host "  Python:      $CondaPython" -ForegroundColor Green
     Write-Host "  PyInstaller: $CondaPyInstaller" -ForegroundColor Green
 
-    # 将 conda 环境的 Library\bin 和 Scripts 加入 PATH
-    # 这样 PyInstaller 子进程能找到 CUDA DLL（cudart、cublas 等）
+    $env:PYTHONNOUSERSITE = "1"
     $env:PATH = "$CondaEnvPath\Library\bin;$CondaEnvPath\Scripts;$CondaEnvPath;$env:PATH"
-    Write-Host "  PATH prepended with conda env dirs" -ForegroundColor Green
+    Write-Host "  PYTHONNOUSERSITE=1, PATH prepended with conda env dirs" -ForegroundColor Green
 
     if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
 
