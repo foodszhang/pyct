@@ -29,7 +29,7 @@
         <x>0</x>
         <y>0</y>
         <width>520</width>
-        <height>800</height>
+        <height>1000</height>
        </rect>
       </property>
       <layout class="QVBoxLayout" name="scrollLayout">
@@ -43,6 +43,12 @@
         <widget class="QGroupBox" name="groupBoxGeometry">
          <property name="title">
           <string>几何参数</string>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>320</height>
+          </size>
          </property>
          <layout class="QFormLayout" name="formLayoutGeometry">
           <property name="verticalSpacing">
@@ -258,6 +264,12 @@
         <widget class="QGroupBox" name="groupBoxVolume">
          <property name="title">
           <string>重建体参数</string>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>240</height>
+          </size>
          </property>
          <layout class="QFormLayout" name="formLayoutVolume">
           <property name="verticalSpacing">
