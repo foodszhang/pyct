@@ -36,6 +36,29 @@ for f in ['custom_layout.ini', 'user_custom_layout.ini']:
     if os.path.exists(path):
         data_files.append((path, '.'))
 
+# ---- Force collect algorithm package (PyInstaller misses namespace packages) ----
+algorithm_dir = os.path.join(repo_root, 'algorithm')
+if os.path.isdir(algorithm_dir):
+    for root, dirs, files in os.walk(algorithm_dir):
+        rel = os.path.relpath(root, repo_root)
+        for f in files:
+            if f.endswith('.py'):
+                data_files.append((os.path.join(root, f), rel))
+
+# ---- Force collect qt_gui Python files ----
+for f in os.listdir(qt_gui_dir):
+    if f.endswith('.py'):
+        data_files.append((os.path.join(qt_gui_dir, f), 'qt_gui'))
+
+# ---- Force collect utils package (project-internal) ----
+utils_dir = os.path.join(repo_root, 'utils')
+if os.path.isdir(utils_dir):
+    for root, dirs, files in os.walk(utils_dir):
+        rel = os.path.relpath(root, repo_root)
+        for f in files:
+            if f.endswith('.py'):
+                data_files.append((os.path.join(root, f), rel))
+
 # ---- Collect ASTRA binaries ----
 astra_binaries = []
 astra_datas = []

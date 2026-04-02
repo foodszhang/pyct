@@ -343,27 +343,27 @@ class ConeBeam:
             )
 
         _ckpt("FDK_CUDA path start")
-        cfg_fdk = ast.astra_dict("FDK_CUDA")
-        cfg_fdk["ProjectionDataId"] = self.proj_id
-        cfg_fdk["ReconstructionDataId"] = self.rec_id
-        _ckpt("FDK_CUDA algorithm create start")
-        alg_id = ast.algorithm.create(cfg_fdk)
-        _ckpt("FDK_CUDA algorithm run start")
-        ast.algorithm.run(alg_id, 1)
-        _ckpt("FDK_CUDA get result start")
-        rec_gpu = ast.data3d.get(self.rec_id)
-        ar = rec_gpu[:]
-        ast.algorithm.delete(alg_id)
-        _ckpt("FDK_CUDA done")
-        print("[Reconstruction] 使用 FDK_CUDA 重建完成")
-
+        try:
+            cfg_fdk = ast.astra_dict("FDK_CUDA")
+            cfg_fdk["ProjectionDataId"] = self.proj_id
+            cfg_fdk["ReconstructionDataId"] = self.rec_id
+            _ckpt("FDK_CUDA algorithm create start")
+            alg_id = ast.algorithm.create(cfg_fdk)
+            _ckpt("FDK_CUDA algorithm run start")
+            ast.algorithm.run(alg_id, 1)
+            _ckpt("FDK_CUDA get result start")
+            rec_gpu = ast.data3d.get(self.rec_id)
+            ar = rec_gpu[:]
+            ast.algorithm.delete(alg_id)
+            _ckpt("FDK_CUDA done")
+            print("[Reconstruction] 使用 FDK_CUDA 重建完成")
         finally:
             ast.data3d.delete(self.rec_id)
             ast.data3d.delete(self.proj_id)
 
         if self.use_hu:
             print("[HU] useHu=True was requested, but HU conversion is disabled")
-        print("[HU] Disabled in current debug stage")
+            print("[HU] Disabled in current debug stage")
         print(f"[Reconstruction] min = {ar.min():.6f}")
         print(f"[Reconstruction] max = {ar.max():.6f}")
         print(f"[Reconstruction] mean = {ar.mean():.6f}")
