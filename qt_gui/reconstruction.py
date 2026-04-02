@@ -184,8 +184,21 @@ class ReconWorker(QThread):
                     ),
                 )
             self.progress.emit(65, "构建几何...")
-            self.progress.emit(80, "FDK 重建中...")
-            rec, use_cuda = cb.reconstruct()
+            if p.get("ring_correction"):
+                self.progress.emit(70, "环形伪影校正...")
+            algo = p.get("algorithm", "FDK")
+            if algo == "FDK":
+                self.progress.emit(80, f"FDK 重建中（滤波器={p.get('filter_type','Ram-Lak')}）...")
+            else:
+                self.progress.emit(80, f"{algo} 迭代重建中（{p.get('iterations',50)} 次）...")
+            rec, use_cuda = cb.reconstruct(
+                filter_type=p.get("filter_type", "Ram-Lak"),
+                algorithm=algo,
+                iterations=p.get("iterations", 50),
+                non_neg_constraint=p.get("non_neg_constraint", True),
+                ring_correction=p.get("ring_correction", False),
+                ring_kernel_size=p.get("ring_kernel_size", 9),
+            )
             self.cuda_used.emit(use_cuda)
             self.progress.emit(95, "保存结果...")
             nii_img = nib.Nifti1Image(rec, np.eye(4))
@@ -279,7 +292,30 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             QtWidgets.QLineEdit, "roiCenterZLineEdit"
         )
 
+        # 高级选项
+        self.filter_type_combo = self.ui.findChild(QtWidgets.QComboBox, "filterTypeComboBox")
+        self.ring_correction_check = self.ui.findChild(QtWidgets.QCheckBox, "ringCorrectionCheckBox")
+        self.ring_kernel_spin = self.ui.findChild(QtWidgets.QSpinBox, "ringKernelSpinBox")
+        self.algorithm_combo = self.ui.findChild(QtWidgets.QComboBox, "algorithmComboBox")
+        self.iterations_spin = self.ui.findChild(QtWidgets.QSpinBox, "iterationsSpinBox")
+        self.non_neg_check = self.ui.findChild(QtWidgets.QCheckBox, "nonNegConstraintCheckBox")
+
+        # 联动逻辑
+        self.ring_correction_check.toggled.connect(self.ring_kernel_spin.setEnabled)
+        self.algorithm_combo.currentTextChanged.connect(self._on_algorithm_changed)
+
         self.init_from_config()
+
+        # 自适应屏幕大小
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            w = min(520, int(avail.width() * 0.35))
+            h = min(int(avail.height() * 0.85), 900)
+            self.resize(w, h)
+
+    def _on_algorithm_changed(self, text):
+        self.iterations_spin.setEnabled(text in ("SIRT", "CGLS"))
 
     def init_from_config(self):
         config = Config.get("ReconParam", None)
@@ -382,6 +418,12 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             "vol_center_x": float(self.roi_center_x_line_edit.text()),
             "vol_center_y": float(self.roi_center_y_line_edit.text()),
             "vol_center_z": float(self.roi_center_z_line_edit.text()),
+            "filter_type": self.filter_type_combo.currentText(),
+            "ring_correction": self.ring_correction_check.isChecked(),
+            "ring_kernel_size": self.ring_kernel_spin.value(),
+            "algorithm": self.algorithm_combo.currentText(),
+            "iterations": self.iterations_spin.value(),
+            "non_neg_constraint": self.non_neg_check.isChecked(),
         }
         self.params = params
         self.accept()

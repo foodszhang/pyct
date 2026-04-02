@@ -7,7 +7,7 @@ from threading import Thread, Lock, Event
 import queue
 from multiprocessing.connection import Client
 import weakref
-import numpy as np
+import array
 import time
 
 
@@ -100,7 +100,7 @@ class Detector:
     def trans_img(self, img, filename):
         img.UnscrambleImage()
         buf = img.GetPlaneData()
-        ar = np.array(buf, dtype=np.uint16)
+        ar = array.array('H', buf)
         buf = ar.tobytes()
         return buf
 
@@ -117,7 +117,7 @@ class Detector:
         img.UnscrambleImage()
         # sys.stderr.write("send {}\r\n".format(count))
         buf = img.GetPlaneData()
-        ar = np.array(buf, dtype=np.uint16)
+        ar = array.array('H', buf)
         buf = ar.tobytes()
         self.client_lock.acquire()
         client.send((count, buf))
@@ -205,7 +205,7 @@ def seq_callback(fc, buf, detRef):
     count = fc - cbData.start_count - 2
 
     buf = img.GetPlaneData()
-    ar = np.array(buf, dtype=np.uint16)
+    ar = array.array('H', buf)
     buf = ar.tobytes()
     sys.stderr.write("queue count {}\r\n".format(count))
     cbData.send_queue.put((count, buf))

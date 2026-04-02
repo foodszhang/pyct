@@ -123,7 +123,8 @@ class ConeBeam:
             TM, TN = simg.shape
             self.w = TN
             self.h = TM
-            reshaped = cv2.resize(simg, (self.TN, self.TM))
+            interp = cv2.INTER_AREA if (self.TN < TN or self.TM < TM) else cv2.INTER_LINEAR
+            reshaped = cv2.resize(simg, (self.TN, self.TM), interpolation=interp)
             reshaped = np.clip(reshaped, 1.0, self.I0)
             reshaped = -np.log(reshaped / self.I0)
             self.data[:, n, :] = reshaped
@@ -221,7 +222,8 @@ class ConeBeam:
             TM, TN = simg.shape
             self.w = TN
             self.h = TM
-            reshaped = cv2.resize(simg, (self.TN, self.TM))
+            interp = cv2.INTER_AREA if (self.TN < TN or self.TM < TM) else cv2.INTER_LINEAR
+            reshaped = cv2.resize(simg, (self.TN, self.TM), interpolation=interp)
             reshaped = np.clip(reshaped, 1.0, self.I0)
             reshaped = -np.log(reshaped / self.I0)
             self.data_lock.acquire()
@@ -329,7 +331,9 @@ class ConeBeam:
         print(f"[Preprocess] data max = {self.data.max():.6f}")
         print(f"[Preprocess] data mean = {self.data.mean():.6f}")
 
-    def reconstruct(self):
+    def reconstruct(self, *, filter_type="Ram-Lak", algorithm="FDK",
+                    iterations=50, non_neg_constraint=True,
+                    ring_correction=False, ring_kernel_size=9):
         use_cuda = _cuda_available()
         _ckpt(f"CUDA available: {use_cuda}")
 
@@ -342,24 +346,74 @@ class ConeBeam:
                 "3. astra.test() 输出的报错信息"
             )
 
+        # 环形伪影校正
+        if ring_correction:
+            from scipy.ndimage import median_filter
+            for row in range(self.data.shape[0]):
+                sino_row = self.data[row, :, :]
+                row_mean = sino_row.mean(axis=0)
+                row_mean_filtered = median_filter(row_mean, size=ring_kernel_size)
+                correction = row_mean - row_mean_filtered
+                self.data[row, :, :] -= correction[np.newaxis, :]
+            print(f"[Preprocess] 环形伪影校正完成，核大小={ring_kernel_size}")
+
+        filter_map = {
+            "Ram-Lak": "ram-lak",
+            "Shepp-Logan": "shepp-logan",
+            "Cosine": "cosine",
+            "Hamming": "hamming",
+            "Hann": "hann",
+        }
+
         _ckpt("FDK_CUDA path start")
         try:
-            cfg_fdk = ast.astra_dict("FDK_CUDA")
-            cfg_fdk["ProjectionDataId"] = self.proj_id
-            cfg_fdk["ReconstructionDataId"] = self.rec_id
-            _ckpt("FDK_CUDA algorithm create start")
-            alg_id = ast.algorithm.create(cfg_fdk)
-            _ckpt("FDK_CUDA algorithm run start")
-            ast.algorithm.run(alg_id, 1)
-            _ckpt("FDK_CUDA get result start")
-            rec_gpu = ast.data3d.get(self.rec_id)
-            ar = rec_gpu[:]
-            ast.algorithm.delete(alg_id)
-            _ckpt("FDK_CUDA done")
-            print("[Reconstruction] 使用 FDK_CUDA 重建完成")
+            if algorithm == "FDK":
+                cfg_fdk = ast.astra_dict("FDK_CUDA")
+                cfg_fdk["ProjectionDataId"] = self.proj_id
+                cfg_fdk["ReconstructionDataId"] = self.rec_id
+                cfg_fdk["option"] = {}
+                cfg_fdk["option"]["FilterType"] = filter_map.get(filter_type, "ram-lak")
+                _ckpt("FDK_CUDA algorithm create start")
+                alg_id = ast.algorithm.create(cfg_fdk)
+                _ckpt("FDK_CUDA algorithm run start")
+                ast.algorithm.run(alg_id, 1)
+                _ckpt("FDK_CUDA get result start")
+                rec_gpu = ast.data3d.get(self.rec_id)
+                ar = rec_gpu[:]
+                ast.algorithm.delete(alg_id)
+                _ckpt("FDK_CUDA done")
+                print(f"[Reconstruction] 使用 FDK_CUDA 滤波器={filter_type} 重建完成")
+            elif algorithm == "SIRT":
+                cfg = ast.astra_dict("SIRT3D_CUDA")
+                cfg["ProjectionDataId"] = self.proj_id
+                cfg["ReconstructionDataId"] = self.rec_id
+                cfg["option"] = {}
+                if non_neg_constraint:
+                    cfg["option"]["MinConstraint"] = 0.0
+                alg_id = ast.algorithm.create(cfg)
+                ast.algorithm.run(alg_id, iterations)
+                rec_gpu = ast.data3d.get(self.rec_id)
+                ar = rec_gpu[:]
+                ast.algorithm.delete(alg_id)
+                print(f"[Reconstruction] 使用 SIRT3D_CUDA {iterations} 次迭代完成")
+            elif algorithm == "CGLS":
+                cfg = ast.astra_dict("CGLS3D_CUDA")
+                cfg["ProjectionDataId"] = self.proj_id
+                cfg["ReconstructionDataId"] = self.rec_id
+                alg_id = ast.algorithm.create(cfg)
+                ast.algorithm.run(alg_id, iterations)
+                rec_gpu = ast.data3d.get(self.rec_id)
+                ar = rec_gpu[:]
+                ast.algorithm.delete(alg_id)
+                print(f"[Reconstruction] 使用 CGLS3D_CUDA {iterations} 次迭代完成")
         finally:
             ast.data3d.delete(self.rec_id)
             ast.data3d.delete(self.proj_id)
+
+        # 非负约束后处理（FDK 路径）
+        if algorithm == "FDK" and non_neg_constraint:
+            ar = np.clip(ar, 0, None)
+            print("[Postprocess] 非负约束：裁剪负值")
 
         if self.use_hu:
             print("[HU] useHu=True was requested, but HU conversion is disabled")
