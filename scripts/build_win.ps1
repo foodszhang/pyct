@@ -297,11 +297,19 @@ function Invoke-CondaSetup {
     & $condaPip install -r "$RepoRoot\requirements_qt.txt" pyinstaller
     if ($LASTEXITCODE -ne 0) { Write-Error "pip install failed"; exit 1 }
 
+    # ---- 修复 astra DLL 名称不匹配 ----
+    $astraDll = "$CondaEnvPath\Library\bin\astra.dll"
+    $astraCudaDll = "$CondaEnvPath\Library\bin\AstraCuda64.dll"
+    if ((Test-Path $astraCudaDll) -and (-not (Test-Path $astraDll))) {
+        Copy-Item $astraCudaDll $astraDll
+        Write-Host "  Fixed: copied AstraCuda64.dll -> astra.dll" -ForegroundColor Yellow
+    }
+
     Write-Host "`n  --- Conda Env ---" -ForegroundColor Cyan
     $ErrorActionBackup = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     & $condaPython -c "import sys; print(f'  Python: {sys.version}')"
-    & $condaPython -c "import astra; print(f'  ASTRA: {astra.__version__}, CUDA: {astra.use_cuda()}')"
+    & $condaPython -c "import os; os.add_dll_directory(r'$CondaEnvPath\Library\bin'); os.add_dll_directory(r'$CondaEnvPath\bin'); import astra; print(f'  ASTRA: {astra.__version__}, CUDA: {astra.use_cuda()}')"
     & $condaPython -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')"
     $ErrorActionPreference = $ErrorActionBackup
     Write-Host "  ------------------" -ForegroundColor Cyan
@@ -323,20 +331,40 @@ function Invoke-CondaBuild {
     $CondaEnvPath = Split-Path $CondaPython
     $CondaPyInstaller = Join-Path $CondaEnvPath "Scripts\pyinstaller.exe"
 
+    Write-Host "`n[CondaBuild] Running PyInstaller from conda env..." -ForegroundColor Yellow
+    Write-Host "  Python:      $CondaPython"
+    Write-Host "  PyInstaller: $CondaPyInstaller"
+    Write-Host "  Env path:    $CondaEnvPath"
+
     if (-not (Test-Path $CondaPyInstaller)) {
         Write-Error "PyInstaller not found at $CondaPyInstaller. Run 'just conda-setup' or 'just conda-fix' first."
         exit 1
     }
-    Write-Host "  Python:      $CondaPython" -ForegroundColor Green
-    Write-Host "  PyInstaller: $CondaPyInstaller" -ForegroundColor Green
 
+    # ---- 修复 astra DLL 名称不匹配 ----
+    # conda astra-toolbox 的 Python 绑定 (astra_c.pyd) 链接 astra.dll，
+    # 但 libastra 包安装的文件叫 AstraCuda64.dll。需要复制一份。
+    $astraDll = "$CondaEnvPath\Library\bin\astra.dll"
+    $astraCudaDll = "$CondaEnvPath\Library\bin\AstraCuda64.dll"
+    if ((Test-Path $astraCudaDll) -and (-not (Test-Path $astraDll))) {
+        Copy-Item $astraCudaDll $astraDll
+        Write-Host "  Fixed: copied AstraCuda64.dll -> astra.dll" -ForegroundColor Yellow
+    }
+
+    # ---- 环境隔离 ----
+    # 1. 禁用用户级 site-packages，防止旧版 cv2/numpy 污染打包
     $env:PYTHONNOUSERSITE = "1"
-    $env:PATH = "$CondaEnvPath\Library\bin;$CondaEnvPath\Scripts;$CondaEnvPath;$env:PATH"
-    Write-Host "  PYTHONNOUSERSITE=1, PATH prepended with conda env dirs" -ForegroundColor Green
+    # 2. 将 conda 环境的 DLL 目录加入 PATH（CUDA runtime + astra 核心库）
+    $env:PATH = "$CondaEnvPath\bin;$CondaEnvPath\Library\bin;$CondaEnvPath\Scripts;$CondaEnvPath;$env:PATH"
+    # 3. 设置 CONDA_PREFIX 让 spec 文件能找到 DLL 目录
+    $env:CONDA_PREFIX = $CondaEnvPath
+    Write-Host "  Environment isolated (PYTHONNOUSERSITE=1, PATH/CONDA_PREFIX set)" -ForegroundColor Green
 
+    # ---- 清理旧产物 ----
     if (Test-Path $CondaDistBase) { Remove-Item -Recurse -Force $CondaDistBase }
     if (Test-Path "$BuildDir\work_conda") { Remove-Item -Recurse -Force "$BuildDir\work_conda" }
 
+    # ---- 运行 PyInstaller ----
     & $CondaPyInstaller `
         --noconfirm `
         --distpath $CondaDistBase `
@@ -346,7 +374,7 @@ function Invoke-CondaBuild {
     Write-Host "[CondaBuild] dist contents:"
     Get-ChildItem $CondaDistBase -ErrorAction SilentlyContinue | Select-Object Name
 
-    # 兼容 onedir（默认）和 onefile 两种 spec 模式
+    # 兼容 onedir 和 onefile
     $exePath = ""
     if (Test-Path "$CondaDistDir\PyCT.exe") {
         $exePath = "$CondaDistDir\PyCT.exe"
@@ -421,12 +449,20 @@ function Invoke-CondaFix {
     # 保存 python 路径
     $condaPython | Out-File -Encoding utf8 $CondaPythonFile
 
+    # ---- 修复 astra DLL 名称不匹配 ----
+    $astraDll = "$CondaEnvPath\Library\bin\astra.dll"
+    $astraCudaDll = "$CondaEnvPath\Library\bin\AstraCuda64.dll"
+    if ((Test-Path $astraCudaDll) -and (-not (Test-Path $astraDll))) {
+        Copy-Item $astraCudaDll $astraDll
+        Write-Host "  Fixed: copied AstraCuda64.dll -> astra.dll" -ForegroundColor Yellow
+    }
+
     # 验证
     Write-Host "`n  --- Conda Env ---" -ForegroundColor Cyan
     $ErrorActionBackup = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     & $condaPython -c "import sys; print(f'  Python: {sys.version}')"
-    & $condaPython -c "import astra; print(f'  ASTRA: {astra.__version__}, CUDA: {astra.use_cuda()}')"
+    & $condaPython -c "import os; os.add_dll_directory(r'$CondaEnvPath\Library\bin'); os.add_dll_directory(r'$CondaEnvPath\bin'); import astra; print(f'  ASTRA: {astra.__version__}, CUDA: {astra.use_cuda()}')"
     & $condaPython -c "import PySide6; print(f'  PySide6: {PySide6.__version__}')"
     $ErrorActionPreference = $ErrorActionBackup
     Write-Host "  ------------------" -ForegroundColor Cyan

@@ -7,6 +7,15 @@ import os
 import sys
 import importlib
 
+# ---- 让 PyInstaller 分析阶段能找到 CUDA + astra DLL ----
+conda_prefix = os.environ.get('CONDA_PREFIX', '')
+if conda_prefix:
+    lib_bin = os.path.join(conda_prefix, 'Library', 'bin')
+    env_bin = os.path.join(conda_prefix, 'bin')
+    for d in [lib_bin, env_bin]:
+        if os.path.isdir(d):
+            os.add_dll_directory(d)
+
 block_cipher = None
 repo_root = os.path.dirname(os.path.abspath(SPECPATH))
 
@@ -30,6 +39,16 @@ for f in ['custom_layout.ini', 'user_custom_layout.ini']:
 # ---- Collect ASTRA binaries ----
 astra_binaries = []
 astra_datas = []
+cuda_dlls = []
+
+# 确保能找到 astra.dll 和 CUDA DLL
+if conda_prefix:
+    lib_bin = os.path.join(conda_prefix, 'Library', 'bin')
+    env_bin = os.path.join(conda_prefix, 'bin')
+    for d in [lib_bin, env_bin]:
+        if os.path.isdir(d):
+            os.add_dll_directory(d)
+
 try:
     import astra
     astra_dir = os.path.dirname(astra.__file__)
@@ -43,13 +62,27 @@ try:
             elif f.endswith(('.py', '.cfg', '.txt', '.dat')):
                 astra_datas.append((full, rel))
     print(f"[spec] Collected {len(astra_binaries)} astra binaries, {len(astra_datas)} astra data files")
+
+    # ---- Collect CUDA runtime DLLs for target machine ----
+    cuda_dlls = []
+    if conda_prefix:
+        for dll_dir in [os.path.join(conda_prefix, 'Library', 'bin'),
+                        os.path.join(conda_prefix, 'bin')]:
+            if os.path.isdir(dll_dir):
+                for f in os.listdir(dll_dir):
+                    if f.lower().endswith('.dll') and any(
+                        f.lower().startswith(p) for p in
+                        ['cudart', 'cublas', 'cufft', 'cusparse', 'astra']
+                    ):
+                        cuda_dlls.append((os.path.join(dll_dir, f), '.'))
+        print(f"[spec] Collected {len(cuda_dlls)} CUDA/astra DLLs for packaging")
 except ImportError:
     print("[spec] WARNING: astra not found, CUDA reconstruction will not work in packaged app")
 
 a = Analysis(
     [os.path.join(repo_root, 'pyct_app.py')],
     pathex=[repo_root],
-    binaries=astra_binaries,
+    binaries=astra_binaries + cuda_dlls,
     datas=data_files + astra_datas,
     hiddenimports=[
         'astra',
