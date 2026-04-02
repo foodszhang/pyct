@@ -4,8 +4,8 @@
  <widget class="QWidget" name="Form">
   <property name="minimumSize">
    <size>
-    <width>480</width>
-    <height>500</height>
+    <width>520</width>
+    <height>600</height>
    </size>
   </property>
   <property name="windowTitle">
@@ -28,17 +28,29 @@
        <rect>
         <x>0</x>
         <y>0</y>
-        <width>480</width>
-        <height>600</height>
+        <width>520</width>
+        <height>800</height>
        </rect>
       </property>
       <layout class="QVBoxLayout" name="scrollLayout">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <property name="contentsMargins">
+        <number>10</number>
+       </property>
        <item>
         <widget class="QGroupBox" name="groupBoxGeometry">
          <property name="title">
           <string>几何参数</string>
          </property>
          <layout class="QFormLayout" name="formLayoutGeometry">
+          <property name="verticalSpacing">
+           <number>8</number>
+          </property>
+          <property name="horizontalSpacing">
+           <number>12</number>
+          </property>
           <item row="0" column="0">
            <widget class="QLabel" name="labelSod">
             <property name="text">
@@ -48,6 +60,12 @@
           </item>
           <item row="0" column="1">
            <widget class="QLineEdit" name="SODLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>722.6798</string>
             </property>
@@ -62,6 +80,12 @@
           </item>
           <item row="1" column="1">
            <widget class="QLineEdit" name="SDDLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>778.6765</string>
             </property>
@@ -76,6 +100,12 @@
           </item>
           <item row="2" column="1">
            <widget class="QLineEdit" name="columnCountLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>768</string>
             </property>
@@ -90,6 +120,12 @@
           </item>
           <item row="3" column="1">
            <widget class="QLineEdit" name="rowCountLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>972</string>
             </property>
@@ -104,6 +140,12 @@
           </item>
           <item row="4" column="1">
            <widget class="QLineEdit" name="xSpacingLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.0748</string>
             </property>
@@ -118,6 +160,12 @@
           </item>
           <item row="5" column="1">
            <widget class="QLineEdit" name="ySpacingLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.0748</string>
             </property>
@@ -132,6 +180,12 @@
           </item>
           <item row="6" column="1">
            <widget class="QLineEdit" name="angleLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>1</string>
             </property>
@@ -146,6 +200,12 @@
           </item>
           <item row="7" column="1">
            <widget class="QLineEdit" name="detectorXLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>5.3333</string>
             </property>
@@ -160,6 +220,12 @@
           </item>
           <item row="8" column="1">
            <widget class="QLineEdit" name="detectorYLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>41.77848</string>
             </property>
@@ -174,6 +240,12 @@
           </item>
           <item row="9" column="1">
            <widget class="QLineEdit" name="rotationLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>-0.15</string>
             </property>
@@ -188,6 +260,12 @@
           <string>重建体参数</string>
          </property>
          <layout class="QFormLayout" name="formLayoutVolume">
+          <property name="verticalSpacing">
+           <number>8</number>
+          </property>
+          <property name="horizontalSpacing">
+           <number>12</number>
+          </property>
           <item row="0" column="0">
            <widget class="QLabel" name="labelVoxelPs">
             <property name="text">
@@ -197,6 +275,12 @@
           </item>
           <item row="0" column="1">
            <widget class="QLineEdit" name="voxelPixelSizeLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.25</string>
             </property>
@@ -211,6 +295,12 @@
           </item>
           <item row="1" column="1">
            <widget class="QLineEdit" name="voxelSizeXLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>512</string>
             </property>
@@ -225,6 +315,12 @@
           </item>
           <item row="2" column="1">
            <widget class="QLineEdit" name="voxelSizeYLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>512</string>
             </property>
@@ -239,6 +335,12 @@
           </item>
           <item row="3" column="1">
            <widget class="QLineEdit" name="voxelSizeZLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>512</string>
             </property>
@@ -253,6 +355,12 @@
           </item>
           <item row="4" column="1">
            <widget class="QLineEdit" name="roiCenterXLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.0</string>
             </property>
@@ -267,6 +375,12 @@
           </item>
           <item row="5" column="1">
            <widget class="QLineEdit" name="roiCenterYLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.0</string>
             </property>
@@ -281,6 +395,12 @@
           </item>
           <item row="6" column="1">
            <widget class="QLineEdit" name="roiCenterZLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.0</string>
             </property>
@@ -295,6 +415,12 @@
           <string>校准参数</string>
          </property>
          <layout class="QFormLayout" name="formLayoutCalib">
+          <property name="verticalSpacing">
+           <number>8</number>
+          </property>
+          <property name="horizontalSpacing">
+           <number>12</number>
+          </property>
           <item row="0" column="0">
            <widget class="QLabel" name="labelEta">
             <property name="text">
@@ -304,6 +430,12 @@
           </item>
           <item row="0" column="1">
            <widget class="QLineEdit" name="etaLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.0</string>
             </property>
@@ -318,6 +450,12 @@
           </item>
           <item row="1" column="1">
            <widget class="QLineEdit" name="vcLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.0</string>
             </property>
@@ -332,6 +470,12 @@
           </item>
           <item row="2" column="1">
            <widget class="QLineEdit" name="vsLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.0</string>
             </property>
@@ -346,6 +490,12 @@
           </item>
           <item row="3" column="1">
            <widget class="QLineEdit" name="sxLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.5</string>
             </property>
@@ -360,6 +510,12 @@
           </item>
           <item row="4" column="1">
            <widget class="QLineEdit" name="syLineEdit">
+  <property name="maximumSize">
+   <size>
+    <width>160</width>
+    <height>16777215</height>
+   </size>
+  </property>
             <property name="text">
              <string>0.5</string>
             </property>
@@ -374,6 +530,12 @@
           <string>高级选项</string>
          </property>
          <layout class="QFormLayout" name="formLayoutAdvanced">
+          <property name="verticalSpacing">
+           <number>8</number>
+          </property>
+          <property name="horizontalSpacing">
+           <number>12</number>
+          </property>
           <item row="0" column="0">
            <widget class="QLabel" name="labelFilter">
             <property name="text">
