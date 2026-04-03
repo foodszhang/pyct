@@ -184,9 +184,12 @@ class ScanWindow(QtWidgets.QDialog):
                     return
 
             CREATE_NO_WINDOW = 0x08000000
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # SW_HIDE
             sub = subprocess.Popen(
                 [
-                    py34,
+                    str(py34),
                     "detector.py",
                     "seq",
                     self.expose_time_line_edit.text().strip(),
@@ -198,6 +201,7 @@ class ScanWindow(QtWidgets.QDialog):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 creationflags=CREATE_NO_WINDOW,
+                startupinfo=startupinfo,
             )
             assert sub.stdout
             assert sub.stdin
@@ -238,8 +242,16 @@ class ScanWindow(QtWidgets.QDialog):
             sub.stdin.write("start\n".encode())
             sub.stdin.flush()
             controller.motion_rotation(380)
-            cmd = sub.stdout.readline()
+            # 带超时读取，防止子进程挂住导致永远阻塞
+            cmd = _readline_with_timeout(sub.stdout, timeout=60)
             print("77777", cmd)
+            # 主动关闭子进程
+            try:
+                if sub.poll() is None:
+                    sub.stdin.close()
+                    sub.wait(timeout=10)
+            except Exception:
+                pass
             for fut in self.fut_list:
                 fut.result()
             self.ProgressBarChanged.emit(100, "采集完成")

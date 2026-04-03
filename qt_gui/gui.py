@@ -128,7 +128,6 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.dark_snap_button.clicked.connect(self.open_dark_snap_window)
         self.empty_snap_button.clicked.connect(self.open_empty_snap_window)
-        self.empty_snap_button.clicked.connect(self.open_empty_snap_window)
         self.scan_button.clicked.connect(self.open_scan_window)
         self.dark_snap_window.ImageChanged.connect(self.update_scan_view)
         self.empty_snap_window.ImageChanged.connect(self.update_scan_view)

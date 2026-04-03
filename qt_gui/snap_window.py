@@ -170,9 +170,12 @@ class SnapWindow(QtWidgets.QDialog):
                         return
 
             CREATE_NO_WINDOW = 0x08000000
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # SW_HIDE
             sub = subprocess.Popen(
                 [
-                    py34,
+                    str(py34),
                     "detector.py",
                     "seq",
                     self.expose_time_line_edit.text().strip(),
@@ -184,6 +187,7 @@ class SnapWindow(QtWidgets.QDialog):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 creationflags=CREATE_NO_WINDOW,
+                startupinfo=startupinfo,
             )
             assert sub.stdout
             assert sub.stdin
@@ -206,7 +210,14 @@ class SnapWindow(QtWidgets.QDialog):
                 return
             sub.stdin.write("start\n".encode())
             sub.stdin.flush()
-            cmd = sub.stdout.readline()
+            cmd = _readline_with_timeout(sub.stdout, timeout=60)
+            # 主动关闭子进程
+            try:
+                if sub.poll() is None:
+                    sub.stdin.close()
+                    sub.wait(timeout=10)
+            except Exception:
+                pass
             self.ProgressBarChanged.emit(100, "流程结束")
         except Exception as e:
             import traceback
