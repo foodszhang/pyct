@@ -57,7 +57,8 @@ class SnapWindow(QtWidgets.QDialog):
         self.parent_window = parent
         self.ui = loader.load(get_ui_path("snap.ui"), None)
         self.button_box = self.ui.findChild(QtWidgets.QDialogButtonBox, "buttonBox")
-        self.button_box.accepted.connect(self.button_start)
+        self.button_box.accepted.connect(self._on_accepted)
+        self.button_box.rejected.connect(self.ui.close)
         self.file_name_line_edit = self.ui.findChild(
             QtWidgets.QLineEdit, "filenameLineEdit"
         )
@@ -108,6 +109,7 @@ class SnapWindow(QtWidgets.QDialog):
 
     def scan_thread(self):
         try:
+            sub = None
             py34 = find_py34()
             if not py34:
                 self.error.emit(
@@ -167,6 +169,7 @@ class SnapWindow(QtWidgets.QDialog):
                         self._unfreeze_ui()
                         return
 
+            CREATE_NO_WINDOW = 0x08000000
             sub = subprocess.Popen(
                 [
                     py34,
@@ -180,6 +183,7 @@ class SnapWindow(QtWidgets.QDialog):
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                creationflags=CREATE_NO_WINDOW,
             )
             assert sub.stdout
             assert sub.stdin
@@ -210,12 +214,26 @@ class SnapWindow(QtWidgets.QDialog):
             print(f"[Error] snap scan_thread crash: {traceback.format_exc()}")
             self.error.emit(str(e))
         finally:
+            # 确保子进程关闭
+            try:
+                if sub and sub.poll() is None:
+                    sub.terminate()
+                    sub.wait(timeout=5)
+            except Exception:
+                try:
+                    sub.kill()
+                except Exception:
+                    pass
             self._unfreeze_ui()
             if self.snap_type == SnapType.EMPTY:
                 try:
                     self.parent_window.xray_off()
                 except Exception:
                     pass
+
+    def _on_accepted(self):
+        self.ui.close()
+        self.button_start()
 
     def button_start(self):
         self.ProgressBarChanged.emit(0, "初始化中")
