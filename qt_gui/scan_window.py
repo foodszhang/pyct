@@ -35,6 +35,16 @@ def _readline_with_timeout(stream, timeout=15):
     except queue.Empty:
         return None
 
+
+def _drain_stream(stream):
+    if stream is None:
+        return
+    while True:
+        line = stream.readline()
+        if not line:
+            break
+        print(line.decode(errors="replace"), end="")
+
 loader = QUiLoader()
 Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 
@@ -66,6 +76,7 @@ class ScanWindow(QtWidgets.QDialog):
         self.rotation_speed_line_edit = self.ui.findChild(
             QtWidgets.QLineEdit, "rotationSpeedLineEdit"
         )
+        self.scan_mode = "连续采集"
 
         self.pool = ThreadPoolExecutor(max_workers=20)
         self.img = None
@@ -86,7 +97,8 @@ class ScanWindow(QtWidgets.QDialog):
         try:
             while True:
                 cnt, buf = conn.recv()
-                self.ProgressBarChanged.emit(20 + cnt * 0.22, "")
+                progress = 20 + int((cnt + 1) * 75 / max(self.scan_number, 1))
+                self.ProgressBarChanged.emit(min(progress, 95), "")
                 w = 1944
                 h = 1536
                 ar = np.frombuffer(buf, dtype=np.uint16).reshape(w, h)
@@ -152,8 +164,19 @@ class ScanWindow(QtWidgets.QDialog):
                 return
 
             detector_bridge_dir = get_detector_bridge_dir()
+            detector_script = os.path.join(
+                os.path.dirname(detector_bridge_dir), "detector.py"
+            )
+            if not os.path.isfile(detector_script):
+                detector_script = "detector.py"
 
             # seq exposeTime gapTime number
+            self.scan_number = int(self.number_line_edit.text().strip())
+            expose_time = int(self.expose_time_line_edit.text().strip())
+            gap_time = int(self.gap_time_line_edit.text().strip())
+            scan_mode = self.scan_mode
+            if self.scan_number <= 0:
+                raise ValueError("采集图片张数必须大于0")
             speed = int(self.rotation_speed_line_edit.text().strip())
             controller.set_speed(speed)
             controller.set_init_speed(speed)
@@ -187,15 +210,19 @@ class ScanWindow(QtWidgets.QDialog):
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = 0  # SW_HIDE
-            sub = subprocess.Popen(
-                [
+            if scan_mode == "普通采集":
+                detector_args = [str(py34), detector_script, "stepseq", str(expose_time)]
+            else:
+                detector_args = [
                     str(py34),
-                    "detector.py",
+                    detector_script,
                     "seq",
-                    self.expose_time_line_edit.text().strip(),
-                    self.gap_time_line_edit.text().strip(),
-                    self.number_line_edit.text().strip(),
-                ],
+                    str(expose_time),
+                    str(gap_time),
+                    str(self.scan_number),
+                ]
+            sub = subprocess.Popen(
+                detector_args,
                 cwd=detector_bridge_dir,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -205,6 +232,7 @@ class ScanWindow(QtWidgets.QDialog):
             )
             assert sub.stdout
             assert sub.stdin
+            Thread(target=_drain_stream, args=(sub.stderr,), daemon=True).start()
 
             if self.dark_line_edit.text().strip():
                 dark_path = os.path.join(
@@ -226,25 +254,42 @@ class ScanWindow(QtWidgets.QDialog):
             ready_cmd = _readline_with_timeout(sub.stdout, timeout=15)
             self.ProgressBarChanged.emit(20, "采集中")
             if ready_cmd is None or not ready_cmd.startswith(b"READY"):
-                try:
-                    stderr_out = sub.stderr.read(2048) if sub.stderr else b""
-                except Exception:
-                    stderr_out = b""
-                print(f"[Error] detector.py stderr: {stderr_out.decode(errors='replace')}")
+                stderr_msg = "探测器错误详情已输出到日志窗口"
                 self.error.emit(
                     f"探测器启动失败。\n"
                     f"ready_cmd={ready_cmd!r}\n"
-                    f"stderr={stderr_out.decode(errors='replace')}"
+                    f"{stderr_msg}"
                 )
                 sub.kill()
                 self._unfreeze_ui()
                 return
             sub.stdin.write("start\n".encode())
             sub.stdin.flush()
-            controller.motion_rotation(380)
+            if scan_mode == "普通采集":
+                step_degree = 360 / self.scan_number
+                settle_seconds = gap_time / 1000
+                for cnt in range(self.scan_number):
+                    controller.motion_rotation(step_degree)
+                    time.sleep(settle_seconds)
+                    sub.stdin.write("snap {}\n".format(cnt).encode())
+                    sub.stdin.flush()
+                    snap_cmd = _readline_with_timeout(
+                        sub.stdout, timeout=max(30, int(expose_time / 1000 + 20))
+                    )
+                    if snap_cmd is None or not snap_cmd.startswith(b"ok"):
+                        raise RuntimeError("探测器单张采集失败: {}".format(snap_cmd))
+                sub.stdin.write("exit\n".encode())
+                sub.stdin.flush()
+            else:
+                controller.motion_rotation(380)
             # 带超时读取，防止子进程挂住导致永远阻塞
-            cmd = _readline_with_timeout(sub.stdout, timeout=60)
+            timeout = max(
+                120, int(self.scan_number * (expose_time + gap_time) / 1000 + 60)
+            )
+            cmd = _readline_with_timeout(sub.stdout, timeout=timeout)
             print("77777", cmd)
+            if cmd is None or not cmd.startswith(b"EXIT"):
+                raise RuntimeError("探测器采集未正常结束: {}".format(cmd))
             # 主动关闭子进程
             try:
                 if sub.poll() is None:
@@ -278,8 +323,13 @@ class ScanWindow(QtWidgets.QDialog):
                 pass
 
     def _on_accepted(self):
-        self.ui.close()
+        self.ui.hide()
         self.button_start()
+
+    def set_scan_mode(self, scan_mode: str):
+        self.scan_mode = scan_mode
+        title = "普通采集" if scan_mode == "普通采集" else "旋转采集"
+        self.ui.setWindowTitle(title)
 
     def button_start(self):
         self.parent_window.ct_scan_progress_bar.setValue(0)

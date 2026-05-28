@@ -54,6 +54,9 @@ class ConeBeam:
         vol_center_x: float = 0.0,
         vol_center_y: float = 0.0,
         vol_center_z: float = 0.0,
+        air_percentile: float | None = None,
+        air_zero_percentile: float | None = None,
+        mass_normalize: bool = False,
     ):
         self.SOD = SOD
         self.SDD = SDD
@@ -98,6 +101,9 @@ class ConeBeam:
         self.rescale_slope = rescale_slope
         self.rescale_intercept = rescale_intercept
         self.I0 = 65535.0
+        self.air_percentile = air_percentile
+        self.air_zero_percentile = air_zero_percentile
+        self.mass_normalize = mass_normalize
         self.eta = eta
         self.vc = vc
         self.vs = vs
@@ -126,7 +132,11 @@ class ConeBeam:
             interp = cv2.INTER_AREA if (self.TN < TN or self.TM < TM) else cv2.INTER_LINEAR
             reshaped = cv2.resize(simg, (self.TN, self.TM), interpolation=interp)
             reshaped = np.clip(reshaped, 1.0, self.I0)
-            reshaped = -np.log(reshaped / self.I0)
+            I0 = self.I0
+            if self.air_percentile is not None:
+                I0 = float(np.percentile(reshaped, self.air_percentile))
+                I0 = max(I0, 1.0)
+            reshaped = -np.log(np.clip(reshaped / I0, 1e-6, 1.0))
             self.data[:, n, :] = reshaped
         angles = list(img_dict.keys())
         perAngle = 2 * np.pi / self.number_of_img
@@ -225,20 +235,32 @@ class ConeBeam:
             interp = cv2.INTER_AREA if (self.TN < TN or self.TM < TM) else cv2.INTER_LINEAR
             reshaped = cv2.resize(simg, (self.TN, self.TM), interpolation=interp)
             reshaped = np.clip(reshaped, 1.0, self.I0)
-            reshaped = -np.log(reshaped / self.I0)
+            I0 = self.I0
+            if self.air_percentile is not None:
+                I0 = float(np.percentile(reshaped, self.air_percentile))
+                I0 = max(I0, 1.0)
+            reshaped = -np.log(np.clip(reshaped / I0, 1e-6, 1.0))
             self.data_lock.acquire()
             self.data[:, number, :] = reshaped
             self.data_lock.release()
         else:
             print(f"{full_path} not exists")
 
-    def load_img(self, angle_from_filename: bool = False, progress_callback=None):
+    def load_img(
+        self,
+        angle_from_filename: bool = False,
+        progress_callback=None,
+        drop_duplicate_360: bool = False,
+        fill_missing_degrees: bool = False,
+    ):
         if angle_from_filename:
             tif_files = [f for f in os.listdir(self.proj_path) if f.endswith(".tif")]
             parsed = []
             for f in tif_files:
                 try:
                     angle_deg = float(f.replace(".tif", ""))
+                    if drop_duplicate_360 and abs(angle_deg - 360.0) < 1e-6:
+                        continue
                     parsed.append((f, angle_deg))
                 except ValueError:
                     continue
@@ -289,6 +311,64 @@ class ConeBeam:
             futs.append(f)
         for fut in futs:
             fut.result()
+
+        if angle_from_filename and fill_missing_degrees:
+            target_degrees = np.arange(0, 360, dtype=np.float32)
+            src_degrees = np.asarray(angle_deg_list, dtype=np.float32)
+            order = np.argsort(src_degrees)
+            src_degrees = src_degrees[order]
+            src_data = self.data[:, order, :]
+            filled = np.empty((self.TM, len(target_degrees), self.TN), dtype=np.float32)
+            src_index = {int(round(a)): i for i, a in enumerate(src_degrees)}
+            for out_i, degree in enumerate(target_degrees):
+                degree_i = int(degree)
+                if degree_i in src_index:
+                    filled[:, out_i, :] = src_data[:, src_index[degree_i], :]
+                    continue
+                right = int(np.searchsorted(src_degrees, degree, side="right"))
+                if right <= 0:
+                    left = len(src_degrees) - 1
+                    right = 0
+                    span = (src_degrees[right] + 360.0) - src_degrees[left]
+                    weight = (degree + 360.0 - src_degrees[left]) / span
+                elif right >= len(src_degrees):
+                    left = len(src_degrees) - 1
+                    right = 0
+                    span = (src_degrees[right] + 360.0) - src_degrees[left]
+                    weight = (degree - src_degrees[left]) / span
+                else:
+                    left = right - 1
+                    span = src_degrees[right] - src_degrees[left]
+                    weight = (degree - src_degrees[left]) / span
+                filled[:, out_i, :] = (
+                    (1.0 - weight) * src_data[:, left, :]
+                    + weight * src_data[:, right, :]
+                )
+            self.data = filled
+            angles = [a * np.pi / 180.0 for a in target_degrees]
+            count = len(target_degrees)
+            print(
+                f"[Angles] 线性补齐缺失角度: {len(src_degrees)} -> {count} 张"
+            )
+
+        if self.air_zero_percentile is not None:
+            for i in range(self.data.shape[1]):
+                base = float(np.percentile(self.data[:, i, :], self.air_zero_percentile))
+                self.data[:, i, :] = np.clip(self.data[:, i, :] - base, 0.0, None)
+            print(f"[Preprocess] 每角度空气基线归零 p={self.air_zero_percentile}")
+
+        if self.mass_normalize:
+            metrics = np.zeros(self.data.shape[1], dtype=np.float32)
+            for i in range(self.data.shape[1]):
+                img = self.data[:, i, :]
+                metrics[i] = float(np.mean(np.clip(img, 0.0, np.percentile(img, 99.5))))
+            target = float(np.median(metrics[metrics > 1e-8]))
+            for i, metric in enumerate(metrics):
+                if metric <= 1e-8:
+                    continue
+                scale = np.clip(target / float(metric), 0.75, 1.33)
+                self.data[:, i, :] *= scale
+            print("[Preprocess] 每角度总衰减积分归一化完成")
         self.angles = angles
 
         if self.w > 0:

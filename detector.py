@@ -312,3 +312,37 @@ if __name__ == "__main__":
         sys.stdout.flush()
         sys.stderr.write("end6666\r\n")
         sys.stderr.flush()
+    elif progress == "stepseq":
+        exposeTime = int(sys.argv[2])
+        detector = Detector()
+        detector.set_snap_mode(exposeTime)
+
+        sys.stdout.write("READY\n")
+        sys.stdout.flush()
+
+        start_cmd = sys.stdin.readline()
+        if not start_cmd.startswith("start"):
+            sys.stdout.write("ERROR4\n")
+            sys.stdout.flush()
+            sys.exit(1)
+
+        while True:
+            cmd = sys.stdin.readline()
+            if cmd.startswith("snap"):
+                parts = cmd.split()
+                count = int(parts[1]) if len(parts) > 1 else 0
+                fut = detector.snap()
+                if fut is None:
+                    sys.stdout.write("ERROR5\n")
+                    sys.stdout.flush()
+                    continue
+                buf = fut.result()
+                detector.client.send((count, buf))
+                sys.stdout.write("ok\n")
+                sys.stdout.flush()
+            elif cmd.startswith("exit"):
+                break
+            else:
+                break
+        sys.stdout.write("EXIT\n")
+        sys.stdout.flush()

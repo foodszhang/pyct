@@ -116,6 +116,9 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QPushButton, "emptySnapButton"
         )
         self.scan_button = self.ui.findChild(QtWidgets.QPushButton, "scanButton")
+        self.normal_scan_button = self.ui.findChild(
+            QtWidgets.QPushButton, "normalScanButton"
+        )
         self.scan_window = ScanWindow(parent_window=self)
         self.dark_snap_window = SnapWindow(parent=self, type=SnapType.DARK)
         self.empty_snap_window = SnapWindow(parent=self, type=SnapType.EMPTY)
@@ -129,6 +132,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dark_snap_button.clicked.connect(self.open_dark_snap_window)
         self.empty_snap_button.clicked.connect(self.open_empty_snap_window)
         self.scan_button.clicked.connect(self.open_scan_window)
+        self.normal_scan_button.clicked.connect(self.open_normal_scan_window)
         self.dark_snap_window.ImageChanged.connect(self.update_scan_view)
         self.empty_snap_window.ImageChanged.connect(self.update_scan_view)
         self.dark_snap_window.ProgressBarChanged.connect(self.update_progress_bar)
@@ -180,6 +184,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.xray_reconnect_button,
             self.xray_off_button,
             self.scan_button,
+            self.normal_scan_button,
             self.dark_snap_button,
             self.empty_snap_button,
         ]
@@ -370,6 +375,7 @@ class MainWindow(QtWidgets.QMainWindow):
             w.setEnabled(False)
         if self.xray_status != "待开启":
             self.scan_button.setEnabled(False)
+            self.normal_scan_button.setEnabled(False)
             self.dark_snap_button.setEnabled(False)
             self.empty_snap_button.setEnabled(False)
 
@@ -413,6 +419,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 w.setEnabled(True)
         if self.xray_status == "待开启":
             self.scan_button.setEnabled(True)
+            self.normal_scan_button.setEnabled(True)
             self.dark_snap_button.setEnabled(True)
             self.empty_snap_button.setEnabled(True)
             self.xray_warm_button.setEnabled(False)
@@ -682,6 +689,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.empty_snap_window.ui.show()
 
     def open_scan_window(self):
+        self.scan_window.set_scan_mode("连续采集")
+        self.scan_window.ui.show()
+
+    def open_normal_scan_window(self):
+        self.scan_window.set_scan_mode("普通采集")
         self.scan_window.ui.show()
 
     def update_scan_view(self, img):

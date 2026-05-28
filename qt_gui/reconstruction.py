@@ -310,7 +310,7 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         screen = QtWidgets.QApplication.primaryScreen()
         if screen:
             avail = screen.availableGeometry()
-            w = min(520, int(avail.width() * 0.35))
+            w = min(720, max(680, int(avail.width() * 0.45)))
             h = min(int(avail.height() * 0.85), 900)
             self.resize(w, h)
 

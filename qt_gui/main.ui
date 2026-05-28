@@ -54,7 +54,7 @@
         <string>暗场数据采集</string>
        </property>
       </widget>
-      <widget class="QPushButton" name="scanButton">
+       <widget class="QPushButton" name="scanButton">
        <property name="geometry">
         <rect>
          <x>240</x>
@@ -63,10 +63,23 @@
          <height>23</height>
         </rect>
        </property>
-       <property name="text">
-        <string>旋转采集</string>
-       </property>
-      </widget>
+        <property name="text">
+         <string>旋转采集</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="normalScanButton">
+        <property name="geometry">
+         <rect>
+          <x>240</x>
+          <y>270</y>
+          <width>75</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>普通采集</string>
+        </property>
+       </widget>
       <widget class="GraphicsView" name="scanGraphicsView" native="true">
        <property name="enabled">
         <bool>true</bool>
@@ -93,11 +106,11 @@
         <string>平场数据据采集</string>
        </property>
       </widget>
-      <widget class="QProgressBar" name="ctScanProgressBar">
+       <widget class="QProgressBar" name="ctScanProgressBar">
        <property name="geometry">
         <rect>
          <x>30</x>
-         <y>310</y>
+          <y>340</y>
          <width>118</width>
          <height>23</height>
         </rect>
@@ -106,11 +119,11 @@
         <number>0</number>
        </property>
       </widget>
-      <widget class="QLabel" name="ctScanProgressLabel">
+       <widget class="QLabel" name="ctScanProgressLabel">
        <property name="geometry">
         <rect>
          <x>30</x>
-         <y>280</y>
+          <y>315</y>
          <width>101</width>
          <height>16</height>
         </rect>

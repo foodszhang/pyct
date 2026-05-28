@@ -37,6 +37,16 @@ def _readline_with_timeout(stream, timeout=15):
     except queue.Empty:
         return None
 
+
+def _drain_stream(stream):
+    if stream is None:
+        return
+    while True:
+        line = stream.readline()
+        if not line:
+            break
+        print(line.decode(errors="replace"), end="")
+
 loader = QUiLoader()
 Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 
@@ -141,6 +151,11 @@ class SnapWindow(QtWidgets.QDialog):
                 return
 
             detector_bridge_dir = get_detector_bridge_dir()
+            detector_script = os.path.join(
+                os.path.dirname(detector_bridge_dir), "detector.py"
+            )
+            if not os.path.isfile(detector_script):
+                detector_script = "detector.py"
 
             # seq exposeTime gapTime number
             if self.snap_type == SnapType.EMPTY:
@@ -176,7 +191,7 @@ class SnapWindow(QtWidgets.QDialog):
             sub = subprocess.Popen(
                 [
                     str(py34),
-                    "detector.py",
+                    detector_script,
                     "seq",
                     self.expose_time_line_edit.text().strip(),
                     self.expose_time_line_edit.text().strip(),
@@ -191,19 +206,16 @@ class SnapWindow(QtWidgets.QDialog):
             )
             assert sub.stdout
             assert sub.stdin
+            Thread(target=_drain_stream, args=(sub.stderr,), daemon=True).start()
 
             ready_cmd = _readline_with_timeout(sub.stdout, timeout=15)
             self.ProgressBarChanged.emit(20, "准备中")
             if ready_cmd is None or not ready_cmd.startswith(b"READY"):
-                try:
-                    stderr_out = sub.stderr.read(2048) if sub.stderr else b""
-                except Exception:
-                    stderr_out = b""
-                print(f"[Error] detector.py stderr: {stderr_out.decode(errors='replace')}")
+                stderr_msg = "探测器错误详情已输出到日志窗口"
                 self.error.emit(
                     f"探测器启动失败。\n"
                     f"ready_cmd={ready_cmd!r}\n"
-                    f"stderr={stderr_out.decode(errors='replace')}"
+                    f"{stderr_msg}"
                 )
                 sub.kill()
                 self._unfreeze_ui()
@@ -243,7 +255,7 @@ class SnapWindow(QtWidgets.QDialog):
                     pass
 
     def _on_accepted(self):
-        self.ui.close()
+        self.ui.hide()
         self.button_start()
 
     def button_start(self):
