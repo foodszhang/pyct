@@ -4,9 +4,16 @@ BrightController:
   timeout: 4
 CalibrationParam:
   BBNumber: 6
+  allowLineAngleOffsetFit: false
+  allowLineRollFit: false
+  applyLegacyThetaAsRoll: false
+  beadLayout: line_z
+  beadSpacing: 10.0
   detectorHeight: 1944
   detectorPixelSize: 0.0748
   detectorWidth: 1536
+  method: vshift
+  useSuspiciousBeads: false
 ReconParam:
   SDD: '978.11'
   SOD: '910.7'

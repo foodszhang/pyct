@@ -141,8 +141,10 @@ class SnapWindow(QtWidgets.QDialog):
         self.ProgressBarChanged.emit(-1, "error")
 
     def scan_thread(self):
+        sub = None
+        server_holder = {}
+        controller = None
         try:
-            sub = None
             py34 = find_py34()
             if not py34:
                 self.error.emit(
@@ -160,7 +162,6 @@ class SnapWindow(QtWidgets.QDialog):
             self.full_filename = full_filename
 
             ready_event = threading.Event()
-            server_holder = {}
             server_thread = Thread(
                 target=pipe.detector_server,
                 args=(r"\\.\pipe\detectResult", b"ctRestruct", self.detector_receive),

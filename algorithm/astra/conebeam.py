@@ -52,6 +52,7 @@ class ConeBeam:
         vc: float = 0.0,
         vs: float = 0.0,
         rotation: float = 0.0,
+        angle_offset_deg: float = 0.0,
         vol_center_x: float = 0.0,
         vol_center_y: float = 0.0,
         vol_center_z: float = 0.0,
@@ -109,8 +110,10 @@ class ConeBeam:
         self.vc = vc
         self.vs = vs
         self.rotation = rotation
+        self.angle_offset_deg = angle_offset_deg
         print(f"[Geometry] eta = {self.eta}, vc = {self.vc}, vs = {self.vs}")
         print(f"[Geometry] detector_roll_deg = {self.rotation}")
+        print(f"[Geometry] angle_offset_deg = {self.angle_offset_deg}")
         print(
             f"[Geometry] vol_center = ({self.vol_center_x}, {self.vol_center_y}, {self.vol_center_z}) mm"
         )
@@ -141,9 +144,8 @@ class ConeBeam:
                 I0 = max(I0, 1.0)
             reshaped = -np.log(np.clip(reshaped / I0, 1e-6, 1.0))
             self.data[:, n, :] = reshaped
-        angles = list(img_dict.keys())
-        perAngle = 2 * np.pi / self.number_of_img
-        angles = [i * perAngle for i in angles]
+        angles = [item[0] for item in img_list]
+        angles = [(float(i) + self.angle_offset_deg) * np.pi / 180.0 for i in angles]
 
         if self.w > 0:
             expected_tn = int(self.w * self.sx) if self.w > 0 else self.TN
@@ -280,7 +282,7 @@ class ConeBeam:
             parsed.sort(key=lambda x: x[1])
             filenames = [p[0] for p in parsed]
             angle_deg_list = [p[1] for p in parsed]
-            angles = [a * np.pi / 180.0 for a in angle_deg_list]
+            angles = [(a + self.angle_offset_deg) * np.pi / 180.0 for a in angle_deg_list]
             count = len(filenames)
             print(f"[Angles] 从文件名加载 {count} 张投影（支持非均匀/缺角）")
             print(
@@ -294,7 +296,12 @@ class ConeBeam:
                 if os.path.exists(full_path):
                     filenames.append(f"{i}.tif")
             count = len(filenames)
-            angles = [i * 2 * np.pi / self.number_of_img for i in range(count)]
+            angles = [
+                (i * 360.0 / self.number_of_img + self.angle_offset_deg)
+                * np.pi
+                / 180.0
+                for i in range(count)
+            ]
             print(f"[Angles] 从序号加载 {count} 张投影（均匀假设）")
 
         self.data = np.zeros((self.TM, count, self.TN), dtype=np.float32)
@@ -354,7 +361,7 @@ class ConeBeam:
                     + weight * src_data[:, right, :]
                 )
             self.data = filled
-            angles = [a * np.pi / 180.0 for a in target_degrees]
+            angles = [(a + self.angle_offset_deg) * np.pi / 180.0 for a in target_degrees]
             count = len(target_degrees)
             print(
                 f"[Angles] 线性补齐缺失角度: {len(src_degrees)} -> {count} 张"
@@ -414,6 +421,7 @@ class ConeBeam:
         print(f"[Geometry] u0 = {self.detectorX_recon}, v0 = {self.detectorY_recon}")
         print(f"[Geometry] eta = {self.eta}, vc = {self.vc}, vs = {self.vs}")
         print(f"[Geometry] detector_roll_deg = {self.rotation}")
+        print(f"[Geometry] angle_offset_deg = {self.angle_offset_deg}")
 
         print("[Preprocess] Using Beer-Lambert projection: -log(I/I0)")
         print(f"[Preprocess] I0 = {self.I0}")

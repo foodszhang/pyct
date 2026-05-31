@@ -59,50 +59,184 @@ class Calibration:
         self.zero_img = np.zeros((h, w, 3), dtype=np.uint8)
         self._observations = None
 
-    def read_circle(self, i):
-        """读取第 i 张投影，返回 6 个珠子的 (u, v) 像素坐标列表"""
-        if not os.path.exists(os.path.join(self.proj_path, f"{i}.tif")):
-            return None
-        img = cv2.imread(os.path.join(self.proj_path, f"{i}.tif"), -1)
+    def detect_circle_file(self, filename):
+        """读取一张投影，返回钢珠坐标列表和检测数量。"""
+        full_path = os.path.join(self.proj_path, filename)
+        if not os.path.exists(full_path):
+            return None, 0
+        img = cv2.imread(full_path, -1)
+        if img is None:
+            return None, 0
         img = cv2.GaussianBlur(img, (5, 5), 0)
         img = cv2.medianBlur(img, 5)
         simg = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
         simg = simg.astype(np.uint8)
         circles = hough_circles(simg)
-        if len(circles) != 6 and len(circles) != 0:
+        detected_count = len(circles)
+        if detected_count != self.num and detected_count != 0:
             threshold = circle_threshold(simg, circles[0])
             th = np.where((simg <= threshold[1]) & (simg >= threshold[0]), simg, 255)
             circles = hough_circles(th)
-            if len(circles) != 6:
-                return None
-        return [(x[0], x[1]) for x in circles]
+            detected_count = len(circles)
+            if detected_count != self.num:
+                return None, detected_count
+        if detected_count != self.num:
+            return None, detected_count
+        return [(x[0], x[1]) for x in circles], detected_count
+
+    def read_circle_file(self, filename):
+        """读取一张投影，返回钢珠的 (u, v) 像素坐标列表"""
+        points, _ = self.detect_circle_file(filename)
+        return points
+
+    def read_circle(self, i):
+        return self.read_circle_file(f"{i}.tif")
 
     def load_img(self, progress_callback=None):
         """加载所有投影，返回观测列表: [(phi, bead_idx, u, v), ...]"""
         if self._observations is not None:
             return self._observations
 
+        parsed = []
+        for filename in os.listdir(self.proj_path):
+            if not filename.lower().endswith(".tif"):
+                continue
+            try:
+                angle_deg = float(filename[:-4])
+            except ValueError:
+                continue
+            parsed.append((filename, angle_deg))
+        parsed.sort(key=lambda x: x[1])
+        if not parsed:
+            raise ValueError(f"No angle-named .tif files found in {self.proj_path}")
+
         pool = ThreadPoolExecutor(max_workers=50)
         fut_list = []
 
-        for i in range(0, 360):
-            fut = pool.submit(self.read_circle, i)
-            fut_list.append((i, fut))
+        for filename, angle_deg in parsed:
+            fut = pool.submit(self.detect_circle_file, filename)
+            fut_list.append((filename, angle_deg, fut))
 
-        observations = []
-        for angle_idx, fut in fut_list:
-            points = fut.result()
+        candidates = []
+        quality_rows = []
+        total = len(fut_list)
+        for idx, (filename, angle_deg, fut) in enumerate(fut_list):
+            points, detected_count = fut.result()
+            if progress_callback is not None:
+                progress_callback(idx + 1, total)
+            suspicious = False
+            reason = ""
             if points is None:
+                suspicious = True
+                reason = "detected_count_mismatch"
+                quality_rows.append([
+                    angle_deg,
+                    detected_count,
+                    self.num,
+                    "",
+                    "",
+                    "",
+                    int(suspicious),
+                    reason,
+                ])
                 continue
             points = sorted(points, key=lambda x: x[1])
-            phi = angle_idx * 2 * np.pi / 360
+            distances = []
+            for a, b in zip(points[:-1], points[1:]):
+                distances.append(float(np.hypot(a[0] - b[0], a[1] - b[1])))
+            min_dist = min(distances) if distances else 0.0
+            max_dist = max(distances) if distances else 0.0
+            mean_dist = float(np.mean(distances)) if distances else 0.0
+            if distances and (min_dist < 5.0 or max_dist > max(80.0, mean_dist * 2.5)):
+                suspicious = True
+                reason = "neighbor_distance_outlier"
+            quality_rows.append([
+                angle_deg,
+                detected_count,
+                self.num,
+                min_dist,
+                max_dist,
+                mean_dist,
+                int(suspicious),
+                reason,
+            ])
+            phi = angle_deg * np.pi / 180.0
             for bead_idx, (u, v) in enumerate(points):
-                observations.append((phi, bead_idx, u, v))
-            if progress_callback is not None:
-                progress_callback(angle_idx + 1, 360)
+                candidates.append({
+                    "phi": phi,
+                    "angle_deg": angle_deg,
+                    "bead_idx": bead_idx,
+                    "u": u,
+                    "v": v,
+                    "suspicious": suspicious,
+                    "reason": reason,
+                })
+        pool.shutdown(wait=False)
+
+        self._mark_continuity_suspicious(candidates, quality_rows)
+        self._write_bead_quality(quality_rows)
+
+        use_suspicious = bool(self.config.get("useSuspiciousBeads", False))
+        observations = []
+        for item in candidates:
+            if item["suspicious"] and not use_suspicious:
+                continue
+            observations.append((item["phi"], item["bead_idx"], item["u"], item["v"]))
+        suspicious_count = sum(1 for item in candidates if item["suspicious"])
+        if suspicious_count:
+            print(f"[Warn] bead detection has {suspicious_count} suspicious observations")
+        print(f"[Calib] observations used: {len(observations)} / total detected: {len(candidates)}")
 
         self._observations = observations
         return observations
+
+    def _mark_continuity_suspicious(self, candidates, quality_rows):
+        by_bead = {}
+        for item in candidates:
+            by_bead.setdefault(item["bead_idx"], []).append(item)
+        bad_angles = set()
+        for bead_items in by_bead.values():
+            bead_items.sort(key=lambda x: x["angle_deg"])
+            jumps = []
+            for prev, cur in zip(bead_items[:-1], bead_items[1:]):
+                jumps.append(float(np.hypot(cur["u"] - prev["u"], cur["v"] - prev["v"])))
+            if not jumps:
+                continue
+            median_jump = float(np.median(jumps))
+            threshold = max(50.0, median_jump * 4.0)
+            for cur, jump in zip(bead_items[1:], jumps):
+                if jump > threshold:
+                    cur["suspicious"] = True
+                    cur["reason"] = "trajectory_jump"
+                    bad_angles.add(cur["angle_deg"])
+        if not bad_angles:
+            return
+        for item in candidates:
+            if item["angle_deg"] in bad_angles:
+                item["suspicious"] = True
+                item["reason"] = "trajectory_jump" if not item["reason"] else f"{item['reason']};trajectory_jump"
+        for row in quality_rows:
+            if row[0] in bad_angles:
+                row[6] = 1
+                row[7] = "trajectory_jump" if not row[7] else f"{row[7]};trajectory_jump"
+
+    def _write_bead_quality(self, quality_rows):
+        diag_dir = os.path.join(self.proj_path, "diagnostics")
+        os.makedirs(diag_dir, exist_ok=True)
+        path = os.path.join(diag_dir, "bead_detection_quality.csv")
+        with open(path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "angle_deg",
+                "detected_count",
+                "expected_count",
+                "min_neighbor_distance",
+                "max_neighbor_distance",
+                "mean_neighbor_distance",
+                "suspicious_ordering",
+                "reason",
+            ])
+            writer.writerows(quality_rows)
 
     def estimate_bead_positions(self, observations, SOD, SDD, u0, v0, du):
         """
@@ -324,6 +458,9 @@ class Calibration:
         u0_used = float(u0_est)
         v0_used = float(v0_cal)
         theta_cal_deg = float(theta_cal)
+        apply_legacy_roll = bool(self.config.get("applyLegacyThetaAsRoll", False))
+        detector_roll_deg = theta_cal_deg if apply_legacy_roll else 0.0
+        roll_source = "legacy_theta" if apply_legacy_roll else "disabled_for_legacy"
         u0_raw = round(u0_used, 2)
         v0_raw = round(v0_used, 2)
         vc_raw = round(best_vc, 6)
@@ -346,7 +483,27 @@ class Calibration:
             f"[CalibResult] vc_recon={vc_recon}, vs_recon={vs_recon}, "
             f"RMS init={rms_init:.4f} -> final={final_rms:.4f}"
         )
-        print(f"[CalibResult] detector_roll_deg={theta_cal_deg:.6f}")
+        print(f"[CalibResult] theta_cal_deg={theta_cal_deg:.6f}")
+        print(f"[CalibResult] detector_roll_deg={detector_roll_deg:.6f}")
+        self._write_residual_diagnostics(
+            "vshift",
+            observations,
+            refined_positions[:, 2],
+            lambda phi, bead_idx: reproject(
+                refined_positions[bead_idx],
+                phi,
+                best_SOD,
+                best_SDD,
+                u0_used,
+                v0_used,
+                best_eta,
+                du,
+                dv,
+                best_vc,
+                best_vs,
+                detector_roll_deg,
+            ),
+        )
 
         return {
             "SOD": SOD_raw,
@@ -358,7 +515,8 @@ class Calibration:
             "u0_used": round(u0_used, 6),
             "v0_used": round(v0_used, 6),
             "theta_cal_deg": round(theta_cal_deg, 6),
-            "detector_roll_deg": round(theta_cal_deg, 6),
+            "detector_roll_deg": round(detector_roll_deg, 6),
+            "roll_source": roll_source,
             "eta": eta_raw,
             "vc_raw": vc_raw,
             "vs_raw": vs_raw,
@@ -374,6 +532,7 @@ class Calibration:
                 "v_shift_sign_in_conebeam": "use -(vc*cos(phi)+vs*sin(phi))",
                 "angles": "phi comes from filename degrees (relative angle), deg->rad",
                 "u0_policy": "u0_raw/u0_used are the value used by joint_optimize",
+                "theta_cal_deg": "theta_cal_deg is diagnostic in legacy vshift mode; not applied as detector roll unless applyLegacyThetaAsRoll=true.",
             },
         }
 
@@ -388,6 +547,23 @@ class Calibration:
         layout = self.config.get("beadLayout", "line_z")
         if layout != "line_z":
             raise ValueError(f"Unsupported beadLayout for rigid phantom: {layout}")
+        allow_roll = bool(self.config.get("allowLineRollFit", False))
+        allow_angle_offset = bool(self.config.get("allowLineAngleOffsetFit", False))
+        if allow_roll or allow_angle_offset:
+            print("[Warn] line_z phantom cannot uniquely identify detector_roll / angle_offset. Result is diagnostic only.")
+        print("[Geometry] line_z model uses reduced identifiable parameter set")
+        print("[Geometry] active: SOD, SDD, u0, v0, eta, vc, vs, phantom_rx, phantom_ry, tx, ty, tz")
+        disabled = ["phantom_rz", "axis_tilt_x_deg", "axis_tilt_y_deg"]
+        if not allow_roll:
+            disabled.append("detector_roll_deg")
+        if not allow_angle_offset:
+            disabled.append("angle_offset_deg")
+        print(f"[Geometry] disabled/reserved: {', '.join(disabled)}")
+        print("[Geometry] axis_tilt_x/y are reserved, not active in current rigid line model")
+        print(
+            "[Geometry] line_z phantom cannot fully identify all 3D geometry parameters; "
+            "multi-column/grid phantom is recommended"
+        )
 
         known = np.zeros((self.num, 3), dtype=np.float64)
         center = (self.num - 1) / 2.0
@@ -403,7 +579,7 @@ class Calibration:
         x0[4] = 0.0
         x0[5] = 0.0
         x0[6] = 0.0
-        x0[7] = theta_cal
+        x0[7] = theta_cal if allow_roll else 0.0
         x0[8] = 0.0
         x0[12:15] = np.mean(bead_positions, axis=0) - np.mean(known, axis=0)
 
@@ -443,6 +619,12 @@ class Calibration:
         ])
 
         def residuals(params):
+            params = params.copy()
+            if not allow_roll:
+                params[7] = 0.0
+            if not allow_angle_offset:
+                params[8] = 0.0
+            params[11] = 0.0
             if params[1] <= params[0]:
                 return np.ones(len(observations) * 2) * 1e4
             points = _rigid_transform(known, params[9], params[10], params[11], params[12:15])
@@ -484,8 +666,31 @@ class Calibration:
         rms_init = float(np.sqrt(np.mean(errors_init**2)))
         final_rms = float(np.sqrt(np.mean(errors_final**2)))
         params = result.x
+        if not allow_roll:
+            params[7] = 0.0
+        if not allow_angle_offset:
+            params[8] = 0.0
+        params[11] = 0.0
         points = _rigid_transform(known, params[9], params[10], params[11], params[12:15])
-        self._write_rigid_diagnostics(observations, params, points, du, dv)
+        self._write_residual_diagnostics(
+            "rigid",
+            observations,
+            known[:, 2],
+            lambda phi, bead_idx: reproject(
+                points[bead_idx],
+                phi + np.deg2rad(params[8]),
+                params[0],
+                params[1],
+                params[2],
+                params[3],
+                params[4],
+                du,
+                dv,
+                params[5],
+                params[6],
+                params[7],
+            ),
+        )
 
         sx = 0.5
         sy = 0.5
@@ -539,51 +744,139 @@ class Calibration:
             "beadLayout": layout,
             "notes": {
                 "model": "rigid line phantom; bead xyz are constrained by spacing and one rigid pose",
-                "axis_tilt": "reserved in result schema; not active in this initial line phantom model",
+                "active_params": "SOD, SDD, u0, v0, eta, vc, vs, phantom_rx, phantom_ry, tx, ty, tz",
+                "disabled_params": "detector_roll and angle_offset are disabled by default for line_z; phantom_rz is fixed to 0",
+                "axis_tilt": "axis_tilt_x/y are reserved and not active in this model",
+                "line_z_limit": "line_z phantom cannot fully identify all 3D geometry parameters; use grid/multi-column phantom for axis tilt",
             },
         }
 
-    def _write_rigid_diagnostics(self, observations, params, points, du, dv):
+    def _write_residual_diagnostics(self, method, observations, bead_z_nominal, project_func):
         diag_dir = os.path.join(self.proj_path, "diagnostics")
         os.makedirs(diag_dir, exist_ok=True)
-        rows_by_bead = []
-        rows_by_angle = {}
-        angle_offset = np.deg2rad(params[8])
+        rows = []
         for phi, bead_idx, u_meas, v_meas in observations:
-            proj = reproject(
-                points[bead_idx],
-                phi + angle_offset,
-                params[0],
-                params[1],
-                params[2],
-                params[3],
-                params[4],
-                du,
-                dv,
-                params[5],
-                params[6],
-                params[7],
-            )
+            proj = project_func(phi, bead_idx)
             if proj is None:
                 continue
             u_res = proj[0] - u_meas
             v_res = proj[1] - v_meas
             total = float(np.sqrt(u_res**2 + v_res**2))
             angle_deg = float(np.rad2deg(phi) % 360.0)
-            rows_by_bead.append([bead_idx, angle_deg, u_meas, v_meas, proj[0], proj[1], u_res, v_res, total])
-            rows_by_angle.setdefault(round(angle_deg, 6), []).append(total)
+            rows.append({
+                "method": method,
+                "bead_idx": bead_idx,
+                "bead_z_nominal": float(bead_z_nominal[bead_idx]),
+                "angle_deg": angle_deg,
+                "u_meas": float(u_meas),
+                "v_meas": float(v_meas),
+                "u_proj": float(proj[0]),
+                "v_proj": float(proj[1]),
+                "u_res": float(u_res),
+                "v_res": float(v_res),
+                "total_err": total,
+            })
 
-        with open(os.path.join(diag_dir, "residual_by_bead.csv"), "w", newline="") as f:
+        with open(os.path.join(diag_dir, f"residual_by_observation_{method}.csv"), "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["bead", "angle_deg", "u_meas", "v_meas", "u_proj", "v_proj", "u_res", "v_res", "total_err"])
-            writer.writerows(rows_by_bead)
+            writer.writerow([
+                "method",
+                "bead_idx",
+                "bead_z_nominal",
+                "angle_deg",
+                "u_meas",
+                "v_meas",
+                "u_proj",
+                "v_proj",
+                "u_res",
+                "v_res",
+                "total_err",
+            ])
+            for row in rows:
+                writer.writerow([row[key] for key in [
+                    "method",
+                    "bead_idx",
+                    "bead_z_nominal",
+                    "angle_deg",
+                    "u_meas",
+                    "v_meas",
+                    "u_proj",
+                    "v_proj",
+                    "u_res",
+                    "v_res",
+                    "total_err",
+                ]])
 
-        with open(os.path.join(diag_dir, "residual_by_angle.csv"), "w", newline="") as f:
+        bead_summary = []
+        for bead_idx in sorted(set(row["bead_idx"] for row in rows)):
+            bead_rows = [row for row in rows if row["bead_idx"] == bead_idx]
+            u_res = np.asarray([row["u_res"] for row in bead_rows])
+            v_res = np.asarray([row["v_res"] for row in bead_rows])
+            total = np.asarray([row["total_err"] for row in bead_rows])
+            bead_summary.append({
+                "method": method,
+                "bead_idx": bead_idx,
+                "bead_z_nominal": float(bead_z_nominal[bead_idx]),
+                "rms_u": float(np.sqrt(np.mean(u_res**2))),
+                "rms_v": float(np.sqrt(np.mean(v_res**2))),
+                "rms_total": float(np.sqrt(np.mean(total**2))),
+                "mean_u": float(np.mean(u_res)),
+                "mean_v": float(np.mean(v_res)),
+                "std_u": float(np.std(u_res)),
+                "std_v": float(np.std(v_res)),
+                "count": len(bead_rows),
+            })
+
+        with open(os.path.join(diag_dir, f"residual_summary_by_bead_{method}.csv"), "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["angle_deg", "rms_px", "count"])
-            for angle_deg in sorted(rows_by_angle):
-                arr = np.asarray(rows_by_angle[angle_deg])
-                writer.writerow([angle_deg, float(np.sqrt(np.mean(arr**2))), len(arr)])
+            keys = ["method", "bead_idx", "bead_z_nominal", "rms_u", "rms_v", "rms_total", "mean_u", "mean_v", "std_u", "std_v", "count"]
+            writer.writerow(keys)
+            for row in bead_summary:
+                writer.writerow([row[key] for key in keys])
+
+        by_angle = {}
+        for row in rows:
+            by_angle.setdefault(round(row["angle_deg"], 6), []).append(row)
+        with open(os.path.join(diag_dir, f"residual_by_angle_{method}.csv"), "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["method", "angle_deg", "rms_u", "rms_v", "rms_total", "count"])
+            for angle_deg in sorted(by_angle):
+                angle_rows = by_angle[angle_deg]
+                u_res = np.asarray([row["u_res"] for row in angle_rows])
+                v_res = np.asarray([row["v_res"] for row in angle_rows])
+                total = np.asarray([row["total_err"] for row in angle_rows])
+                writer.writerow([
+                    method,
+                    angle_deg,
+                    float(np.sqrt(np.mean(u_res**2))),
+                    float(np.sqrt(np.mean(v_res**2))),
+                    float(np.sqrt(np.mean(total**2))),
+                    len(angle_rows),
+                ])
+
+        trends = []
+        if len(bead_summary) >= 2:
+            z = np.asarray([row["bead_z_nominal"] for row in bead_summary], dtype=np.float64)
+            metrics = [
+                ("rms_total", np.asarray([row["rms_total"] for row in bead_summary], dtype=np.float64)),
+                ("mean_v_res", np.asarray([row["mean_v"] for row in bead_summary], dtype=np.float64)),
+                ("mean_u_res", np.asarray([row["mean_u"] for row in bead_summary], dtype=np.float64)),
+            ]
+            for name, values in metrics:
+                slope, intercept = np.polyfit(z, values, 1)
+                warning = ""
+                if name == "rms_total" and slope > 0.01:
+                    warning = "residual_increases_with_height"
+                trends.append([method, name, float(slope), float(intercept), float(abs(slope)), warning])
+            low = min(bead_summary, key=lambda row: row["bead_z_nominal"])
+            high = max(bead_summary, key=lambda row: row["bead_z_nominal"])
+            if high["rms_total"] > low["rms_total"] * 1.2:
+                print("[Warn] Residual increases with bead height. Possible rotation-axis tilt or detector roll not modeled.")
+
+        with open(os.path.join(diag_dir, f"residual_z_trend_{method}.csv"), "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["method", "metric", "slope", "intercept", "abs_slope", "warning"])
+            writer.writerows(trends)
 
 
 def reproject(
@@ -618,10 +911,47 @@ def reproject(
     delta = hit - det0
     basis = np.column_stack([u_dir, v_dir])
     coeff = np.linalg.lstsq(basis, delta, rcond=None)[0]
-    u_proj = u0 + coeff[0]
-    v_proj = v0 + coeff[1] + vc * np.cos(phi) + vs * np.sin(phi)
+    u_proj = u0 + coeff[0] / du
+    v_proj = v0 + coeff[1] / dv + vc * np.cos(phi) + vs * np.sin(phi)
 
     return (u_proj, v_proj)
+
+
+def debug_compare_reproject_vs_conevec(
+    SOD=900.0,
+    SDD=1000.0,
+    u0=768.0,
+    v0=972.0,
+    eta=0.0,
+    vc=2.0,
+    vs=-3.0,
+    detector_roll_deg=1.0,
+    du=0.0748,
+    dv=0.0748,
+):
+    """Debug helper for calibration/reconstruction geometry sign conventions."""
+    print("[GeometryCheck] roll positive rotates u toward v")
+    print("[GeometryCheck] v_shift convention: conebeam uses -(vc*cos(phi)+vs*sin(phi))")
+    for angle_deg in (0.0, 45.0, 90.0):
+        phi = np.deg2rad(angle_deg)
+        gamma = np.deg2rad(detector_roll_deg)
+        u_base = np.array([np.cos(phi), np.sin(phi), 0.0])
+        v_base = np.array([-eta * np.sin(phi), eta * np.cos(phi), -1.0])
+        u_dir = np.cos(gamma) * u_base + np.sin(gamma) * v_base
+        v_dir = -np.sin(gamma) * u_base + np.cos(gamma) * v_base
+        P = np.array([10.0, 5.0, 3.0])
+        proj = reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv, vc, vs, detector_roll_deg)
+        if proj is None:
+            raise RuntimeError("Geometry check projection failed")
+        v_shift_cal = vc * np.cos(phi) + vs * np.sin(phi)
+        v_shift_conevec = -v_shift_cal
+        if not np.allclose(u_dir, np.cos(gamma) * u_base + np.sin(gamma) * v_base):
+            raise RuntimeError("Geometry check roll convention failed")
+        print(
+            f"[GeometryCheck] angle={angle_deg:.1f} u_dir={u_dir} v_dir={v_dir} "
+            f"proj={proj} conevec_shift_v_pix={v_shift_conevec:.6f}"
+        )
+    print("[GeometryCheck] calibration/reconstruction convention check passed")
 
 
 def joint_optimize(

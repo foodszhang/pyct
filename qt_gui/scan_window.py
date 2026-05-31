@@ -109,6 +109,7 @@ class ScanWindow(QtWidgets.QDialog):
         self.img = None
         self.dark_img = None
         self.empty_img = None
+        self.projection_normalized = False
         self.img_dict = {}
         self.fut_list = []
 
@@ -116,7 +117,7 @@ class ScanWindow(QtWidgets.QDialog):
         dark = None
         empty = None
         max_dark = None
-        if self.dark_img is not None and self.empty_img is not None:
+        if self.projection_normalized:
             dark = self.dark_img
             empty = self.empty_img
             max_dark = np.max(dark)
@@ -131,15 +132,19 @@ class ScanWindow(QtWidgets.QDialog):
                 h = 1536
                 ar = np.frombuffer(buf, dtype=np.uint16).reshape(w, h)
                 ar = np.flip(ar, axis=0)
-                if self.dark_img is not None and self.empty_img is not None:
-                    ar = (ar - dark) / (empty - dark)
+                if self.projection_normalized:
+                    ar_norm = np.clip((ar.astype(np.float32) - dark) / (empty - dark), 0, 1)
+                    ar_for_recon = ar_norm * 65535.0
+                    show_ar = cv2.resize(ar_norm, (800, 800))
+                else:
+                    ar_for_recon = ar.astype(np.float32)
+                    show_ar = cv2.resize(ar, (800, 800))
 
                 angle_key = self._normalize_projection_key(cnt)
-                self.img_dict[angle_key] = ar
-                show_ar = cv2.resize(ar, (800, 800))
+                self.img_dict[angle_key] = ar_for_recon.astype(np.float32)
                 # ar = cv2.normalize(ar, None, 0, 255, cv2.NORM_MINMAX)
                 self.ImageChanged.emit(show_ar)
-                fut = self.pool.submit(self.save_img, ar, angle_key)
+                fut = self.pool.submit(self.save_img, ar_for_recon, angle_key)
                 self.fut_list.append(fut)
 
         except EOFError:
@@ -150,8 +155,11 @@ class ScanWindow(QtWidgets.QDialog):
         filename = f"{_format_angle_name(cnt)}.tif"
         full_filename = os.path.join(self.parent_window.project_path, filename)
         print("saved", full_filename)
-        img = np.clip(img, 0, 1)
-        img = (img * 65535).astype(np.uint16)
+        if self.projection_normalized and np.max(img) <= 1.5:
+            img = np.clip(img, 0, 1) * 65535
+        else:
+            img = np.clip(img, 0, 65535)
+        img = img.astype(np.uint16)
         cv2.imwrite(full_filename, img)
 
     def _normalize_projection_key(self, cnt):
@@ -168,8 +176,11 @@ class ScanWindow(QtWidgets.QDialog):
         self.ProgressBarChanged.emit(-1, "error")
 
     def scan_thread(self):
+        sub = None
+        server_holder = {}
+        controller = None
+        self.fut_list = []
         try:
-            sub = None
             config = Config.get("ZolixMcController", None)
             if not config:
                 self.error.emit("转台控制器配置出错!请检查config.yaml文件")
@@ -189,7 +200,6 @@ class ScanWindow(QtWidgets.QDialog):
             print(f"[Detector] 使用 py34: {py34}")
 
             ready_event = threading.Event()
-            server_holder = {}
             server_thread = Thread(
                 target=pipe.detector_server,
                 args=(r"\\.\pipe\detectResult", b"ctRestruct", self.detector_receive),
@@ -247,6 +257,45 @@ class ScanWindow(QtWidgets.QDialog):
                     self._unfreeze_ui()
                     return
 
+            missing_paths = []
+            if self.dark_line_edit.text().strip():
+                dark_path = os.path.join(
+                    self.parent_window.project_path, self.dark_line_edit.text().strip()
+                )
+                if os.path.exists(dark_path):
+                    self.dark_img = cv2.imread(dark_path, -1)
+                    if self.dark_img is None:
+                        missing_paths.append(dark_path)
+                    else:
+                        self.dark_img = self.dark_img.astype(np.float32)
+                else:
+                    missing_paths.append(dark_path)
+            else:
+                self.dark_img = None
+            if self.empty_line_edit.text().strip():
+                empty_path = os.path.join(
+                    self.parent_window.project_path, self.empty_line_edit.text().strip()
+                )
+                if os.path.exists(empty_path):
+                    self.empty_img = cv2.imread(empty_path, -1)
+                    if self.empty_img is None:
+                        missing_paths.append(empty_path)
+                    else:
+                        self.empty_img = self.empty_img.astype(np.float32)
+                else:
+                    missing_paths.append(empty_path)
+            else:
+                self.empty_img = None
+            if missing_paths:
+                self.error.emit("校正文件不存在:\n" + "\n".join(missing_paths))
+                self._unfreeze_ui()
+                return
+            self.projection_normalized = self.dark_img is not None and self.empty_img is not None
+            if self.projection_normalized:
+                print("[Scan] Saving normalized transmission projections")
+            else:
+                print("[Scan] Saving raw detector projections")
+
             CREATE_NO_WINDOW = 0x08000000
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -274,23 +323,6 @@ class ScanWindow(QtWidgets.QDialog):
             assert sub.stdout
             assert sub.stdin
             Thread(target=_drain_stream, args=(sub.stderr,), daemon=True).start()
-
-            if self.dark_line_edit.text().strip():
-                dark_path = os.path.join(
-                    self.parent_window.project_path, self.dark_line_edit.text().strip()
-                )
-                if os.path.exists(dark_path):
-                    self.dark_img = cv2.imread(dark_path, -1)
-            else:
-                self.dark_img = None
-            if self.empty_line_edit.text().strip():
-                empty_path = os.path.join(
-                    self.parent_window.project_path, self.empty_line_edit.text().strip()
-                )
-                if os.path.exists(empty_path):
-                    self.empty_img = cv2.imread(empty_path, -1)
-            else:
-                self.empty_img = None
 
             ready_cmd = _readline_with_timeout(sub.stdout, timeout=15)
             self.ProgressBarChanged.emit(20, "采集中")
@@ -321,8 +353,12 @@ class ScanWindow(QtWidgets.QDialog):
                     if snap_cmd is None or not snap_cmd.startswith(b"ok"):
                         raise RuntimeError("探测器单张采集失败: {}".format(snap_cmd))
                     if cnt < self.scan_number - 1:
-                        controller.motion_rotation(step_degree)
+                        if not controller.motion_rotation(step_degree):
+                            raise RuntimeError("普通采集转台步进失败")
                         time.sleep(settle_seconds)
+                if not controller.motion_rotation(step_degree):
+                    raise RuntimeError("普通采集结束回到 360/0 度失败")
+                print("[Scan] Step scan finished, returned to nominal 360/0 deg")
                 sub.stdin.write("exit\n".encode())
                 sub.stdin.flush()
             else:
@@ -361,11 +397,21 @@ class ScanWindow(QtWidgets.QDialog):
                     sub.kill()
                 except Exception:
                     pass
+            for fut in self.fut_list:
+                try:
+                    fut.result()
+                except Exception as e:
+                    print(f"[Error] save image failed: {e}")
             _close_subprocess_streams(sub)
             _close_listener(server_holder)
             self._unfreeze_ui()
             try:
                 self.parent_window.xray_off()
+            except Exception:
+                pass
+            try:
+                if controller is not None:
+                    controller.close()
             except Exception:
                 pass
 
@@ -385,6 +431,7 @@ class ScanWindow(QtWidgets.QDialog):
         self.img = None
         self.dark_img = None
         self.empty_img = None
+        self.projection_normalized = False
         self.img_dict = {}
         self.fut_list = []
         self._scan_received = 0

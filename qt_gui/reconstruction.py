@@ -164,6 +164,7 @@ class ReconWorker(QThread):
                 vc=p["vc"],
                 vs=p["vs"],
                 rotation=p["rotation"],
+                angle_offset_deg=p["angle_offset_deg"],
                 sx=p["sx"],
                 sy=p["sy"],
                 useHu=False,
@@ -543,6 +544,7 @@ class ReconstrcionDialog(QtWidgets.QDialog):
 
     def startReconstruction(self):
         self.save_config()
+        calib = Config.get("CalibResult", {})
         params = {
             "NX": int(self.voxel_size_x_line_edit.text()),
             "NY": int(self.voxel_size_y_line_edit.text()),
@@ -557,6 +559,7 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             "detector_x": float(self.detector_x_line_edit.text()),
             "detector_y": float(self.detector_y_line_edit.text()),
             "rotation": float(self.rotation_line_edit.text()),
+            "angle_offset_deg": float(calib.get("angle_offset_deg", 0.0)),
             "use_scan": self.use_scan_check_box.isChecked(),
             "rescale_slope": self.rescale_slope,
             "rescale_intercept": self.rescale_intercept,
