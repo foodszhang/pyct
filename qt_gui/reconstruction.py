@@ -163,6 +163,7 @@ class ReconWorker(QThread):
                 eta=p["eta"],
                 vc=p["vc"],
                 vs=p["vs"],
+                rotation=p["rotation"],
                 sx=p["sx"],
                 sy=p["sy"],
                 useHu=False,
@@ -471,7 +472,7 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.y_spacing_line_edit.setText(str(config["ySpacing"]))
         self.detector_x_line_edit.setText(str(config["detectorX"]))
         self.detector_y_line_edit.setText(str(config["detectorY"]))
-        self.rotation_line_edit.setText(str(config["rotation"]))
+        self.rotation_line_edit.setText(str(config.get("rotation", "0.0")))
         self.rescale_slope = float(config["rescale_slope"])
         self.rescale_intercept = float(config["rescale_intercept"])
         calib = Config.get("CalibResult", {})
@@ -481,6 +482,16 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.vs_line_edit.setText(str(calib.get("vs_recon", "0.0")))
         self.sx_line_edit.setText(str(calib.get("sx", "0.5")))
         self.sy_line_edit.setText(str(calib.get("sy", "0.5")))
+        if calib:
+            self.detector_x_line_edit.setText(
+                str(calib.get("u0_used", calib.get("u0_raw", config.get("detectorX", "0.0"))))
+            )
+            self.detector_y_line_edit.setText(
+                str(calib.get("v0_used", calib.get("v0_raw", config.get("detectorY", "0.0"))))
+            )
+            self.rotation_line_edit.setText(
+                str(calib.get("detector_roll_deg", config.get("rotation", "0.0")))
+            )
 
         if calib and cal_config:
             sx = float(calib.get("sx", 0.5))
@@ -522,6 +533,11 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         calib["vs_recon"] = float(self.vs_line_edit.text())
         calib["sx"] = float(self.sx_line_edit.text())
         calib["sy"] = float(self.sy_line_edit.text())
+        calib["u0_raw"] = float(self.detector_x_line_edit.text())
+        calib["v0_raw"] = float(self.detector_y_line_edit.text())
+        calib["u0_used"] = float(self.detector_x_line_edit.text())
+        calib["v0_used"] = float(self.detector_y_line_edit.text())
+        calib["detector_roll_deg"] = float(self.rotation_line_edit.text())
         Config["CalibResult"] = calib
         yaml.dump(Config, open(get_config_path(), "w"), Dumper=yaml.Dumper)
 
@@ -540,6 +556,7 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             "SDD": float(self.sdd_line_edit.text()),
             "detector_x": float(self.detector_x_line_edit.text()),
             "detector_y": float(self.detector_y_line_edit.text()),
+            "rotation": float(self.rotation_line_edit.text()),
             "use_scan": self.use_scan_check_box.isChecked(),
             "rescale_slope": self.rescale_slope,
             "rescale_intercept": self.rescale_intercept,

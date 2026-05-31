@@ -5,6 +5,7 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import os
 import sys
+import csv
 from scipy.optimize import minimize_scalar, least_squares
 
 
@@ -33,13 +34,28 @@ def hough_circles(img):
     return circles[0]
 
 
+def _rigid_transform(points, rx_deg, ry_deg, rz_deg, translation):
+    rx = np.deg2rad(rx_deg)
+    ry = np.deg2rad(ry_deg)
+    rz = np.deg2rad(rz_deg)
+    cx, sx = np.cos(rx), np.sin(rx)
+    cy, sy = np.cos(ry), np.sin(ry)
+    cz, sz = np.cos(rz), np.sin(rz)
+    rot_x = np.array([[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]])
+    rot_y = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]])
+    rot_z = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
+    rotation = rot_z @ rot_y @ rot_x
+    return points @ rotation.T + np.asarray(translation, dtype=np.float64)
+
+
 class Calibration:
-    def __init__(self, proj_path, dpixel, num, w, h):
+    def __init__(self, proj_path, dpixel, num, w, h, config=None):
         self.proj_path = proj_path
         self.dpixel = dpixel
         self.num = num
         self.w = w
         self.h = h
+        self.config = config or {}
         self.zero_img = np.zeros((h, w, 3), dtype=np.uint8)
         self._observations = None
 
@@ -305,8 +321,11 @@ class Calibration:
 
         sx = 0.5
         sy = 0.5
-        u0_raw = round(u0_cal, 2)
-        v0_raw = round(v0_cal, 2)
+        u0_used = float(u0_est)
+        v0_used = float(v0_cal)
+        theta_cal_deg = float(theta_cal)
+        u0_raw = round(u0_used, 2)
+        v0_raw = round(v0_used, 2)
         vc_raw = round(best_vc, 6)
         vs_raw = round(best_vs, 6)
         eta_raw = round(best_eta, 6)
@@ -320,19 +339,26 @@ class Calibration:
 
         print(
             f"[CalibResult] SOD={SOD_raw}, SDD={SDD_raw}, "
-            f"u0_raw={u0_raw}, v0_raw={v0_raw}, "
+            f"u0_used={u0_used:.6f}, v0_used={v0_used:.6f}, "
             f"eta={eta_raw}, vc_raw={vc_raw}, vs_raw={vs_raw}"
         )
         print(
             f"[CalibResult] vc_recon={vc_recon}, vs_recon={vs_recon}, "
             f"RMS init={rms_init:.4f} -> final={final_rms:.4f}"
         )
+        print(f"[CalibResult] detector_roll_deg={theta_cal_deg:.6f}")
 
         return {
             "SOD": SOD_raw,
             "SDD": SDD_raw,
             "u0_raw": u0_raw,
             "v0_raw": v0_raw,
+            "u0_cal": round(float(u0_cal), 6),
+            "u0_est": round(float(u0_est), 6),
+            "u0_used": round(u0_used, 6),
+            "v0_used": round(v0_used, 6),
+            "theta_cal_deg": round(theta_cal_deg, 6),
+            "detector_roll_deg": round(theta_cal_deg, 6),
             "eta": eta_raw,
             "vc_raw": vc_raw,
             "vs_raw": vs_raw,
@@ -347,11 +373,222 @@ class Calibration:
             "notes": {
                 "v_shift_sign_in_conebeam": "use -(vc*cos(phi)+vs*sin(phi))",
                 "angles": "phi comes from filename degrees (relative angle), deg->rad",
+                "u0_policy": "u0_raw/u0_used are the value used by joint_optimize",
             },
         }
 
+    def calculate_rigid_phantom_package(self, progress_callback=None):
+        observations = self.load_img(progress_callback=progress_callback)
+        SOD_cal, SDD_cal, u0_cal, v0_cal, theta_cal = self.calculate(observations)
+        du = dv = self.dpixel
+        bead_positions, u0_est = self.estimate_bead_positions(
+            observations, SOD_cal, SDD_cal, u0_cal, v0_cal, du
+        )
+        spacing = float(self.config.get("beadSpacing", 10.0))
+        layout = self.config.get("beadLayout", "line_z")
+        if layout != "line_z":
+            raise ValueError(f"Unsupported beadLayout for rigid phantom: {layout}")
 
-def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv, vc=0.0, vs=0.0):
+        known = np.zeros((self.num, 3), dtype=np.float64)
+        center = (self.num - 1) / 2.0
+        for k in range(self.num):
+            known[k, 2] = (k - center) * spacing
+
+        n_geom = 9
+        x0 = np.zeros(15, dtype=np.float64)
+        x0[0] = SOD_cal
+        x0[1] = SDD_cal
+        x0[2] = u0_est
+        x0[3] = v0_cal
+        x0[4] = 0.0
+        x0[5] = 0.0
+        x0[6] = 0.0
+        x0[7] = theta_cal
+        x0[8] = 0.0
+        x0[12:15] = np.mean(bead_positions, axis=0) - np.mean(known, axis=0)
+
+        lb = np.array([
+            max(100.0, SOD_cal * 0.7),
+            max(100.0, SDD_cal * 0.7),
+            u0_est - 100.0,
+            v0_cal - 100.0,
+            -0.1,
+            -50.0,
+            -50.0,
+            -5.0,
+            -5.0,
+            -0.5,
+            -0.5,
+            -0.5,
+            -100.0,
+            -100.0,
+            -100.0,
+        ])
+        ub = np.array([
+            SOD_cal * 1.3,
+            SDD_cal * 1.3,
+            u0_est + 100.0,
+            v0_cal + 100.0,
+            0.1,
+            50.0,
+            50.0,
+            5.0,
+            5.0,
+            0.5,
+            0.5,
+            0.5,
+            100.0,
+            100.0,
+            100.0,
+        ])
+
+        def residuals(params):
+            if params[1] <= params[0]:
+                return np.ones(len(observations) * 2) * 1e4
+            points = _rigid_transform(known, params[9], params[10], params[11], params[12:15])
+            angle_offset = np.deg2rad(params[8])
+            res = []
+            for phi, bead_idx, u_meas, v_meas in observations:
+                proj = reproject(
+                    points[bead_idx],
+                    phi + angle_offset,
+                    params[0],
+                    params[1],
+                    params[2],
+                    params[3],
+                    params[4],
+                    du,
+                    dv,
+                    params[5],
+                    params[6],
+                    params[7],
+                )
+                if proj is None:
+                    res.extend([0.0, 0.0])
+                else:
+                    res.extend([proj[0] - u_meas, proj[1] - v_meas])
+            return np.asarray(res)
+
+        x0 = np.clip(x0, lb, ub)
+        result = least_squares(
+            residuals,
+            x0,
+            bounds=(lb, ub),
+            loss="soft_l1",
+            f_scale=2.0,
+            x_scale="jac",
+            max_nfev=10000,
+        )
+        errors_init = residuals(x0)
+        errors_final = residuals(result.x)
+        rms_init = float(np.sqrt(np.mean(errors_init**2)))
+        final_rms = float(np.sqrt(np.mean(errors_final**2)))
+        params = result.x
+        points = _rigid_transform(known, params[9], params[10], params[11], params[12:15])
+        self._write_rigid_diagnostics(observations, params, points, du, dv)
+
+        sx = 0.5
+        sy = 0.5
+        u0_used = float(params[2])
+        v0_used = float(params[3])
+        vc_raw = round(float(params[5]), 6)
+        vs_raw = round(float(params[6]), 6)
+        eta_raw = round(float(params[4]), 6)
+        roll_deg = round(float(params[7]), 6)
+        SOD_raw = round(float(params[0]), 2)
+        SDD_raw = round(float(params[1]), 2)
+        u0_raw = round(u0_used, 2)
+        v0_raw = round(v0_used, 2)
+        vc_recon = round(vc_raw * sy, 6)
+        vs_recon = round(vs_raw * sy, 6)
+        u0_recon = round(u0_raw * sx, 2)
+        v0_recon = round(v0_raw * sy, 2)
+
+        print(f"[CalibResult] rigid_phantom RMS init={rms_init:.4f} -> final={final_rms:.4f}")
+        print(f"[Geometry] detector_roll_deg = {roll_deg}")
+        if abs(roll_deg) > 0.1:
+            print("[Geometry] detector roll detected")
+
+        return {
+            "method": "rigid_phantom",
+            "SOD": SOD_raw,
+            "SDD": SDD_raw,
+            "u0_raw": u0_raw,
+            "v0_raw": v0_raw,
+            "u0_cal": round(float(u0_cal), 6),
+            "u0_est": round(float(u0_est), 6),
+            "u0_used": round(u0_used, 6),
+            "v0_used": round(v0_used, 6),
+            "theta_cal_deg": round(float(theta_cal), 6),
+            "detector_roll_deg": roll_deg,
+            "angle_offset_deg": round(float(params[8]), 6),
+            "axis_tilt_x_deg": 0.0,
+            "axis_tilt_y_deg": 0.0,
+            "eta": eta_raw,
+            "vc_raw": vc_raw,
+            "vs_raw": vs_raw,
+            "rms_init": round(rms_init, 4),
+            "rms_final": round(final_rms, 4),
+            "sx": sx,
+            "sy": sy,
+            "u0_recon": u0_recon,
+            "v0_recon": v0_recon,
+            "vc_recon": vc_recon,
+            "vs_recon": vs_recon,
+            "beadSpacing": spacing,
+            "beadLayout": layout,
+            "notes": {
+                "model": "rigid line phantom; bead xyz are constrained by spacing and one rigid pose",
+                "axis_tilt": "reserved in result schema; not active in this initial line phantom model",
+            },
+        }
+
+    def _write_rigid_diagnostics(self, observations, params, points, du, dv):
+        diag_dir = os.path.join(self.proj_path, "diagnostics")
+        os.makedirs(diag_dir, exist_ok=True)
+        rows_by_bead = []
+        rows_by_angle = {}
+        angle_offset = np.deg2rad(params[8])
+        for phi, bead_idx, u_meas, v_meas in observations:
+            proj = reproject(
+                points[bead_idx],
+                phi + angle_offset,
+                params[0],
+                params[1],
+                params[2],
+                params[3],
+                params[4],
+                du,
+                dv,
+                params[5],
+                params[6],
+                params[7],
+            )
+            if proj is None:
+                continue
+            u_res = proj[0] - u_meas
+            v_res = proj[1] - v_meas
+            total = float(np.sqrt(u_res**2 + v_res**2))
+            angle_deg = float(np.rad2deg(phi) % 360.0)
+            rows_by_bead.append([bead_idx, angle_deg, u_meas, v_meas, proj[0], proj[1], u_res, v_res, total])
+            rows_by_angle.setdefault(round(angle_deg, 6), []).append(total)
+
+        with open(os.path.join(diag_dir, "residual_by_bead.csv"), "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["bead", "angle_deg", "u_meas", "v_meas", "u_proj", "v_proj", "u_res", "v_res", "total_err"])
+            writer.writerows(rows_by_bead)
+
+        with open(os.path.join(diag_dir, "residual_by_angle.csv"), "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["angle_deg", "rms_px", "count"])
+            for angle_deg in sorted(rows_by_angle):
+                arr = np.asarray(rows_by_angle[angle_deg])
+                writer.writerow([angle_deg, float(np.sqrt(np.mean(arr**2))), len(arr)])
+
+
+def reproject(
+    P, phi, SOD, SDD, u0, v0, eta, du, dv, vc=0.0, vs=0.0, detector_roll_deg=0.0
+):
     """
     将3D点P投影到探测器平面，返回像素坐标 (u_proj, v_proj)。
     v0 随角度正弦变化：v0_eff(phi) = v0 + vc*cos(phi) + vs*sin(phi)
@@ -361,8 +598,11 @@ def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv, vc=0.0, vs=0.0):
     src = np.array([np.sin(phi) * SOD, -np.cos(phi) * SOD, 0.0])
     det0 = np.array([-np.sin(phi) * ODD, np.cos(phi) * ODD, 0.0])
 
-    u_dir = np.array([np.cos(phi), np.sin(phi), 0.0])
-    v_dir = np.array([-eta * np.sin(phi), eta * np.cos(phi), -1.0])
+    u_base = np.array([np.cos(phi), np.sin(phi), 0.0])
+    v_base = np.array([-eta * np.sin(phi), eta * np.cos(phi), -1.0])
+    gamma = np.deg2rad(detector_roll_deg)
+    u_dir = np.cos(gamma) * u_base + np.sin(gamma) * v_base
+    v_dir = -np.sin(gamma) * u_base + np.cos(gamma) * v_base
 
     n_hat = np.cross(u_dir, v_dir)
 
@@ -376,13 +616,10 @@ def reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv, vc=0.0, vs=0.0):
     hit = src + t * ray
 
     delta = hit - det0
-    u_proj = u0 + np.dot(delta, u_dir) / du
-    v_proj = (
-        v0
-        + np.dot(delta, v_dir) / (dv * np.dot(v_dir, v_dir))
-        + vc * np.cos(phi)
-        + vs * np.sin(phi)
-    )
+    basis = np.column_stack([u_dir, v_dir])
+    coeff = np.linalg.lstsq(basis, delta, rcond=None)[0]
+    u_proj = u0 + coeff[0]
+    v_proj = v0 + coeff[1] + vc * np.cos(phi) + vs * np.sin(phi)
 
     return (u_proj, v_proj)
 

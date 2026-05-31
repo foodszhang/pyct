@@ -45,6 +45,33 @@ def _drain_stream(stream):
             break
         print(line.decode(errors="replace"), end="")
 
+
+def _close_subprocess_streams(sub):
+    if sub is None:
+        return
+    for stream in (sub.stdin, sub.stdout, sub.stderr):
+        try:
+            if stream is not None:
+                stream.close()
+        except Exception:
+            pass
+
+
+def _close_listener(listener_holder):
+    if not listener_holder:
+        return
+    listener = listener_holder.get("listener")
+    if listener is None:
+        return
+    try:
+        listener.close()
+    except Exception:
+        pass
+
+
+def _format_angle_name(angle_deg):
+    return f"{float(angle_deg):.6f}".rstrip("0").rstrip(".")
+
 loader = QUiLoader()
 Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 
@@ -97,7 +124,8 @@ class ScanWindow(QtWidgets.QDialog):
         try:
             while True:
                 cnt, buf = conn.recv()
-                progress = 20 + int((cnt + 1) * 75 / max(self.scan_number, 1))
+                self._scan_received += 1
+                progress = 20 + int(self._scan_received * 75 / max(self.scan_number, 1))
                 self.ProgressBarChanged.emit(min(progress, 95), "")
                 w = 1944
                 h = 1536
@@ -106,11 +134,12 @@ class ScanWindow(QtWidgets.QDialog):
                 if self.dark_img is not None and self.empty_img is not None:
                     ar = (ar - dark) / (empty - dark)
 
-                self.img_dict[cnt] = ar
+                angle_key = self._normalize_projection_key(cnt)
+                self.img_dict[angle_key] = ar
                 show_ar = cv2.resize(ar, (800, 800))
                 # ar = cv2.normalize(ar, None, 0, 255, cv2.NORM_MINMAX)
                 self.ImageChanged.emit(show_ar)
-                fut = self.pool.submit(self.save_img, ar, cnt)
+                fut = self.pool.submit(self.save_img, ar, angle_key)
                 self.fut_list.append(fut)
 
         except EOFError:
@@ -118,11 +147,21 @@ class ScanWindow(QtWidgets.QDialog):
             print("close!")
 
     def save_img(self, img, cnt):
-        full_filename = os.path.join(self.parent_window.project_path, f"{cnt}.tif")
+        filename = f"{_format_angle_name(cnt)}.tif"
+        full_filename = os.path.join(self.parent_window.project_path, filename)
         print("saved", full_filename)
         img = np.clip(img, 0, 1)
         img = (img * 65535).astype(np.uint16)
         cv2.imwrite(full_filename, img)
+
+    def _normalize_projection_key(self, cnt):
+        try:
+            value = float(cnt)
+        except (TypeError, ValueError):
+            return cnt
+        if abs(value - round(value)) < 1e-6:
+            return int(round(value))
+        return value
 
     def _unfreeze_ui(self):
         """通过 signal 通知主线程解冻 UI"""
@@ -150,16 +189,18 @@ class ScanWindow(QtWidgets.QDialog):
             print(f"[Detector] 使用 py34: {py34}")
 
             ready_event = threading.Event()
+            server_holder = {}
             server_thread = Thread(
                 target=pipe.detector_server,
                 args=(r"\\.\pipe\detectResult", b"ctRestruct", self.detector_receive),
-                kwargs={"ready_event": ready_event},
+                kwargs={"ready_event": ready_event, "listener_holder": server_holder},
                 daemon=True,
             )
             server_thread.start()
 
             if not ready_event.wait(timeout=5):
                 self.error.emit("pipe server 启动超时")
+                _close_listener(server_holder)
                 self._unfreeze_ui()
                 return
 
@@ -261,23 +302,27 @@ class ScanWindow(QtWidgets.QDialog):
                     f"{stderr_msg}"
                 )
                 sub.kill()
+                _close_subprocess_streams(sub)
+                _close_listener(server_holder)
                 self._unfreeze_ui()
                 return
             sub.stdin.write("start\n".encode())
             sub.stdin.flush()
             if scan_mode == "普通采集":
-                step_degree = 360 / self.scan_number
+                step_degree = 360.0 / self.scan_number
                 settle_seconds = gap_time / 1000
                 for cnt in range(self.scan_number):
-                    controller.motion_rotation(step_degree)
-                    time.sleep(settle_seconds)
-                    sub.stdin.write("snap {}\n".format(cnt).encode())
+                    angle_name = _format_angle_name(cnt * step_degree)
+                    sub.stdin.write("snap {}\n".format(angle_name).encode())
                     sub.stdin.flush()
                     snap_cmd = _readline_with_timeout(
                         sub.stdout, timeout=max(30, int(expose_time / 1000 + 20))
                     )
                     if snap_cmd is None or not snap_cmd.startswith(b"ok"):
                         raise RuntimeError("探测器单张采集失败: {}".format(snap_cmd))
+                    if cnt < self.scan_number - 1:
+                        controller.motion_rotation(step_degree)
+                        time.sleep(settle_seconds)
                 sub.stdin.write("exit\n".encode())
                 sub.stdin.flush()
             else:
@@ -316,6 +361,8 @@ class ScanWindow(QtWidgets.QDialog):
                     sub.kill()
                 except Exception:
                     pass
+            _close_subprocess_streams(sub)
+            _close_listener(server_holder)
             self._unfreeze_ui()
             try:
                 self.parent_window.xray_off()
@@ -340,5 +387,6 @@ class ScanWindow(QtWidgets.QDialog):
         self.empty_img = None
         self.img_dict = {}
         self.fut_list = []
+        self._scan_received = 0
         scan_thread = Thread(target=self.scan_thread, daemon=True)
         scan_thread.start()

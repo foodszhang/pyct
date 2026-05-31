@@ -51,6 +51,7 @@ class ConeBeam:
         eta: float = 0.0,
         vc: float = 0.0,
         vs: float = 0.0,
+        rotation: float = 0.0,
         vol_center_x: float = 0.0,
         vol_center_y: float = 0.0,
         vol_center_z: float = 0.0,
@@ -107,7 +108,9 @@ class ConeBeam:
         self.eta = eta
         self.vc = vc
         self.vs = vs
+        self.rotation = rotation
         print(f"[Geometry] eta = {self.eta}, vc = {self.vc}, vs = {self.vs}")
+        print(f"[Geometry] detector_roll_deg = {self.rotation}")
         print(
             f"[Geometry] vol_center = ({self.vol_center_x}, {self.vol_center_y}, {self.vol_center_z}) mm"
         )
@@ -166,10 +169,13 @@ class ConeBeam:
             eta=self.eta,
             vc=self.vc,
             vs=self.vs,
+            rotation=self.rotation,
         )
         self.proj_geom = ast.create_proj_geom("cone_vec", self.TM, self.TN, vectors)
 
-    def build_cone_vec(self, angles, SOD, SDD, u0, v0, eta=0.0, vc=0.0, vs=0.0):
+    def build_cone_vec(
+        self, angles, SOD, SDD, u0, v0, eta=0.0, vc=0.0, vs=0.0, rotation=0.0
+    ):
         """
         构建 ASTRA cone_vec 几何矩阵。
 
@@ -182,11 +188,15 @@ class ConeBeam:
         - eta    : float, 探测器倾斜参数（无量纲）
         - vc     : float, v-shift cosine coefficient (recon pixels)
         - vs     : float, v-shift sine coefficient (recon pixels)
+        - rotation: detector roll angle in degrees. Positive roll rotates u toward v.
         """
         ODD = SDD - SOD
 
         du = self.pixel_size_raw / self.sx
         dv = self.pixel_size_raw / self.sy
+        gamma = np.deg2rad(rotation)
+        cos_g = np.cos(gamma)
+        sin_g = np.sin(gamma)
 
         n_angles = len(angles)
         vectors = np.zeros((n_angles, 12))
@@ -199,13 +209,12 @@ class ConeBeam:
             srcY = -cp * SOD / self.voxel_size
             srcZ = 0.0
 
-            uX = cp * du / self.voxel_size
-            uY = sp * du / self.voxel_size
-            uZ = 0.0
-
-            vX = -eta * sp * dv / self.voxel_size
-            vY = eta * cp * dv / self.voxel_size
-            vZ = -1.0 * dv / self.voxel_size
+            u_base = np.array([cp * du, sp * du, 0.0]) / self.voxel_size
+            v_base = np.array([-eta * sp * dv, eta * cp * dv, -dv]) / self.voxel_size
+            u_vec = cos_g * u_base + sin_g * v_base
+            v_vec = -sin_g * u_base + cos_g * v_base
+            uX, uY, uZ = u_vec
+            vX, vY, vZ = v_vec
 
             dX_on_axis = -sp * ODD / self.voxel_size
             dY_on_axis = cp * ODD / self.voxel_size
@@ -395,6 +404,7 @@ class ConeBeam:
             eta=self.eta,
             vc=self.vc,
             vs=self.vs,
+            rotation=self.rotation,
         )
         self.proj_geom = ast.create_proj_geom("cone_vec", self.TM, self.TN, vectors)
         self.proj_id = ast.data3d.create("-proj3d", self.proj_geom, self.data)
@@ -403,6 +413,7 @@ class ConeBeam:
         print(f"[Geometry] SOD = {self.SOD}, SDD = {self.SDD}")
         print(f"[Geometry] u0 = {self.detectorX_recon}, v0 = {self.detectorY_recon}")
         print(f"[Geometry] eta = {self.eta}, vc = {self.vc}, vs = {self.vs}")
+        print(f"[Geometry] detector_roll_deg = {self.rotation}")
 
         print("[Preprocess] Using Beer-Lambert projection: -log(I/I0)")
         print(f"[Preprocess] I0 = {self.I0}")

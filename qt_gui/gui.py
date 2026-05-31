@@ -71,9 +71,14 @@ class CalibWorker(QThread):
                 int(self.config["BBNumber"]),
                 int(self.config["detectorWidth"]),
                 int(self.config["detectorHeight"]),
+                self.config,
             )
             self.status.emit("正在加载投影...")
-            result = c.calculate_vshift_package(progress_callback=self._on_progress)
+            method = self.config.get("method", "vshift")
+            if method == "rigid_phantom":
+                result = c.calculate_rigid_phantom_package(progress_callback=self._on_progress)
+            else:
+                result = c.calculate_vshift_package(progress_callback=self._on_progress)
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
@@ -458,9 +463,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cal_result = result
         self.cal_sod_line_edit.setText(str(result["SOD"]))
         self.cal_sdd_line_edit.setText(str(result["SDD"]))
-        self.cal_detector_x_line_edit.setText(str(result["u0_raw"]))
-        self.cal_detector_y_line_edit.setText(str(result["v0_raw"]))
-        self.cal_rotation_line_edit.setText("0")
+        self.cal_detector_x_line_edit.setText(str(result.get("u0_used", result.get("u0_raw", 0.0))))
+        self.cal_detector_y_line_edit.setText(str(result.get("v0_used", result.get("v0_raw", 0.0))))
+        self.cal_rotation_line_edit.setText(str(result.get("detector_roll_deg", 0.0)))
         self.cal_eta_line_edit.setText(f"{result['eta']:.6f}")
         self.cal_vc_raw_line_edit.setText(f"{result['vc_raw']:.4f}")
         self.cal_vs_raw_line_edit.setText(f"{result['vs_raw']:.4f}")
@@ -503,9 +508,15 @@ class MainWindow(QtWidgets.QMainWindow):
         cr = self.cal_result
         self.reconstruction_dialog.sod_line_edit.setText(str(cr["SOD"]))
         self.reconstruction_dialog.sdd_line_edit.setText(str(cr["SDD"]))
-        self.reconstruction_dialog.detector_x_line_edit.setText(str(cr["u0_raw"]))
-        self.reconstruction_dialog.detector_y_line_edit.setText(str(cr["v0_raw"]))
-        self.reconstruction_dialog.rotation_line_edit.setText("0")
+        self.reconstruction_dialog.detector_x_line_edit.setText(
+            str(cr.get("u0_used", cr.get("u0_raw", 0.0)))
+        )
+        self.reconstruction_dialog.detector_y_line_edit.setText(
+            str(cr.get("v0_used", cr.get("v0_raw", 0.0)))
+        )
+        self.reconstruction_dialog.rotation_line_edit.setText(
+            str(cr.get("detector_roll_deg", 0.0))
+        )
         self.reconstruction_dialog.eta_line_edit.setText(f"{cr['eta']:.6f}")
         self.reconstruction_dialog.vc_line_edit.setText(f"{cr['vc_recon']:.4f}")
         self.reconstruction_dialog.vs_line_edit.setText(f"{cr['vs_recon']:.4f}")
@@ -524,22 +535,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.reconstruction_dialog.x_spacing_line_edit.setText(str(pixel_size))
         self.reconstruction_dialog.y_spacing_line_edit.setText(str(pixel_size))
 
-        calib_for_yaml = {
-            "SOD": cr["SOD"],
-            "SDD": cr["SDD"],
-            "u0_raw": cr["u0_raw"],
-            "v0_raw": cr["v0_raw"],
-            "eta": cr["eta"],
-            "vc_raw": cr["vc_raw"],
-            "vs_raw": cr["vs_raw"],
-            "sx": cr["sx"],
-            "sy": cr["sy"],
-            "u0_recon": cr["u0_recon"],
-            "v0_recon": cr["v0_recon"],
-            "vc_recon": cr["vc_recon"],
-            "vs_recon": cr["vs_recon"],
-        }
-        Config["CalibResult"] = calib_for_yaml
+        Config["CalibResult"] = dict(cr)
         recon_config = Config.get("ReconParam", {})
         recon_config["columnCount"] = recon_tn
         recon_config["rowCount"] = recon_tm

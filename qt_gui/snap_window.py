@@ -47,6 +47,29 @@ def _drain_stream(stream):
             break
         print(line.decode(errors="replace"), end="")
 
+
+def _close_subprocess_streams(sub):
+    if sub is None:
+        return
+    for stream in (sub.stdin, sub.stdout, sub.stderr):
+        try:
+            if stream is not None:
+                stream.close()
+        except Exception:
+            pass
+
+
+def _close_listener(listener_holder):
+    if not listener_holder:
+        return
+    listener = listener_holder.get("listener")
+    if listener is None:
+        return
+    try:
+        listener.close()
+    except Exception:
+        pass
+
 loader = QUiLoader()
 Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 
@@ -137,16 +160,18 @@ class SnapWindow(QtWidgets.QDialog):
             self.full_filename = full_filename
 
             ready_event = threading.Event()
+            server_holder = {}
             server_thread = Thread(
                 target=pipe.detector_server,
                 args=(r"\\.\pipe\detectResult", b"ctRestruct", self.detector_receive),
-                kwargs={"ready_event": ready_event},
+                kwargs={"ready_event": ready_event, "listener_holder": server_holder},
                 daemon=True,
             )
             server_thread.start()
 
             if not ready_event.wait(timeout=5):
                 self.error.emit("pipe server 启动超时")
+                _close_listener(server_holder)
                 self._unfreeze_ui()
                 return
 
@@ -218,6 +243,8 @@ class SnapWindow(QtWidgets.QDialog):
                     f"{stderr_msg}"
                 )
                 sub.kill()
+                _close_subprocess_streams(sub)
+                _close_listener(server_holder)
                 self._unfreeze_ui()
                 return
             sub.stdin.write("start\n".encode())
@@ -247,6 +274,8 @@ class SnapWindow(QtWidgets.QDialog):
                     sub.kill()
                 except Exception:
                     pass
+            _close_subprocess_streams(sub)
+            _close_listener(server_holder)
             self._unfreeze_ui()
             if self.snap_type == SnapType.EMPTY:
                 try:

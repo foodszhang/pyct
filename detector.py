@@ -25,6 +25,9 @@ class CBData:
 
 class Detector:
     def __init__(self):
+        self.detector = None
+        self.client = None
+        self.pool = None
         try:
             scanner = DexelaPy.BusScannerPy()
             count = scanner.EnumerateDevices()
@@ -180,8 +183,25 @@ class Detector:
         return True
 
     def __del__(self):
-        self.detector.CloseBoard()
+        self.close()
         return
+
+    def close(self):
+        try:
+            if self.detector is not None:
+                self.detector.CloseBoard()
+        except Exception:
+            pass
+        try:
+            if self.client is not None:
+                self.client.close()
+        except Exception:
+            pass
+        try:
+            if self.pool is not None:
+                self.pool.shutdown(wait=False)
+        except Exception:
+            pass
 
 
 all_count = 0
@@ -227,31 +247,37 @@ def send_loop(send_queue, client, client_lock, exit_event):
 
 def fin_loop(fut_queue, exit_queue):
     client = Client(r"\\.\pipe\detectResult", authkey=b"ctRestruct")
-    exited = False
-    while True:
+    try:
+        exited = False
+        while True:
+            try:
+                if exited:
+                    if fut_queue.empty():
+                        break
+                exit_cmd = exit_queue.get_nowait()
+                if exit_cmd:
+                    exited = True
+                    if fut_queue.empty():
+                        break
+            except queue.Empty:
+                pass
+            try:
+                filename, fut = fut_queue.get(timeout=1)
+                if fut:
+                    buf = fut.result(timeout=10)
+                    client.send((filename, buf))
+                    fut_queue.task_done()
+            except queue.Empty:
+                pass
+            except concurrent.futures._base.TimeoutError:
+                pass
+            except Exception as e:
+                raise e
+    finally:
         try:
-            if exited:
-                if fut_queue.empty():
-                    break
-            exit_cmd = exit_queue.get_nowait()
-            if exit_cmd:
-                exited = True
-                if fut_queue.empty():
-                    break
-        except queue.Empty:
+            client.close()
+        except Exception:
             pass
-        try:
-            filename, fut = fut_queue.get(timeout=1)
-            if fut:
-                buf = fut.result(timeout=10)
-                client.send((filename, buf))
-                fut_queue.task_done()
-        except queue.Empty:
-            pass
-        except concurrent.futures._base.TimeoutError:
-            pass
-        except Exception as e:
-            raise e
 
 
 if __name__ == "__main__":
@@ -264,85 +290,106 @@ if __name__ == "__main__":
         exposeTime = 200
         if len(sys.argv) == 3:
             exposeTime = int(sys.argv[2])
-        detector = Detector()
-        detector.set_snap_mode(exposeTime)
-        fut_queue = queue.Queue()
-        exit_queue = queue.Queue()
-        fin_thread = Thread(target=fin_loop, args=(fut_queue, exit_queue))
-        fin_thread.start()
-        while True:
-            cmd = sys.stdin.readline()
-            if cmd.startswith("snap"):
-                _, filename = cmd.split(" ")
-                filename = filename.strip()
-                fut = detector.snap(filename)
-                sys.stdout.write("ok\n")
-                sys.stdout.flush()
-                fut_queue.put((filename, fut))
-            elif cmd.startswith("exit"):
-                exit_queue.put(True)
-                break
-            else:
-                break
+        detector = None
+        try:
+            detector = Detector()
+            detector.set_snap_mode(exposeTime)
+            fut_queue = queue.Queue()
+            exit_queue = queue.Queue()
+            fin_thread = Thread(target=fin_loop, args=(fut_queue, exit_queue))
+            fin_thread.start()
+            while True:
+                cmd = sys.stdin.readline()
+                if cmd.startswith("snap"):
+                    _, filename = cmd.split(" ")
+                    filename = filename.strip()
+                    fut = detector.snap(filename)
+                    sys.stdout.write("ok\n")
+                    sys.stdout.flush()
+                    fut_queue.put((filename, fut))
+                elif cmd.startswith("exit"):
+                    exit_queue.put(True)
+                    break
+                else:
+                    break
+            fin_thread.join()
+        finally:
+            if detector is not None:
+                detector.close()
     elif progress == "seq":
         exposeTime = int(sys.argv[2])
         gapTime = int(sys.argv[3])
         number = int(sys.argv[4])
-        detector = Detector()
-        exit_queue = queue.Queue()
-        sys.stderr.write(
-            "exposeTim {} gapTime{} number {}\r\n".format(exposeTime, gapTime, number)
-        )
-        detector.set_seq_mode(exposeTime, exit_queue, gapTime, number + 1)
+        detector = None
+        try:
+            detector = Detector()
+            exit_queue = queue.Queue()
+            sys.stderr.write(
+                "exposeTim {} gapTime{} number {}\r\n".format(exposeTime, gapTime, number)
+            )
+            detector.set_seq_mode(exposeTime, exit_queue, gapTime, number + 1)
 
-        sys.stdout.write("READY\n")
-        sys.stdout.flush()
-
-        start_cmd = sys.stdin.readline()
-        if not start_cmd.startswith("start"):
-            sys.stdout.write("ERROR4\n")
+            sys.stdout.write("READY\n")
             sys.stdout.flush()
-            sys.exit(1)
-        fin_thread = Thread(target=detector.seq_start, daemon=True)
-        fin_thread.start()
-        sys.stderr.write("start6666")
-        sys.stderr.flush()
-        fin_thread.join()
-        sys.stdout.write("EXIT\n")
-        sys.stdout.flush()
-        sys.stderr.write("end6666\r\n")
-        sys.stderr.flush()
+
+            start_cmd = sys.stdin.readline()
+            if not start_cmd.startswith("start"):
+                sys.stdout.write("ERROR4\n")
+                sys.stdout.flush()
+                sys.exit(1)
+            fin_thread = Thread(target=detector.seq_start, daemon=True)
+            fin_thread.start()
+            sys.stderr.write("start6666")
+            sys.stderr.flush()
+            fin_thread.join()
+            sys.stdout.write("EXIT\n")
+            sys.stdout.flush()
+            sys.stderr.write("end6666\r\n")
+            sys.stderr.flush()
+        finally:
+            if detector is not None:
+                detector.close()
     elif progress == "stepseq":
         exposeTime = int(sys.argv[2])
-        detector = Detector()
-        detector.set_snap_mode(exposeTime)
+        detector = None
+        try:
+            detector = Detector()
+            detector.set_snap_mode(exposeTime)
 
-        sys.stdout.write("READY\n")
-        sys.stdout.flush()
-
-        start_cmd = sys.stdin.readline()
-        if not start_cmd.startswith("start"):
-            sys.stdout.write("ERROR4\n")
+            sys.stdout.write("READY\n")
             sys.stdout.flush()
-            sys.exit(1)
 
-        while True:
-            cmd = sys.stdin.readline()
-            if cmd.startswith("snap"):
-                parts = cmd.split()
-                count = int(parts[1]) if len(parts) > 1 else 0
-                fut = detector.snap()
-                if fut is None:
-                    sys.stdout.write("ERROR5\n")
-                    sys.stdout.flush()
-                    continue
-                buf = fut.result()
-                detector.client.send((count, buf))
-                sys.stdout.write("ok\n")
+            start_cmd = sys.stdin.readline()
+            if not start_cmd.startswith("start"):
+                sys.stdout.write("ERROR4\n")
                 sys.stdout.flush()
-            elif cmd.startswith("exit"):
-                break
-            else:
-                break
-        sys.stdout.write("EXIT\n")
-        sys.stdout.flush()
+                sys.exit(1)
+
+            while True:
+                cmd = sys.stdin.readline()
+                if cmd.startswith("snap"):
+                    parts = cmd.split()
+                    count = parts[1] if len(parts) > 1 else "0"
+                    fut = detector.snap()
+                    if fut is None:
+                        sys.stdout.write("ERROR5\n")
+                        sys.stdout.flush()
+                        break
+                    try:
+                        buf = fut.result()
+                        detector.client.send((count, buf))
+                    except Exception:
+                        sys.stdout.write("ERROR5\n")
+                        sys.stdout.flush()
+                        break
+                    sys.stdout.write("ok\n")
+                    sys.stdout.flush()
+                elif cmd.startswith("exit"):
+                    break
+                else:
+                    break
+            sys.stdout.write("EXIT\n")
+            sys.stdout.flush()
+        finally:
+            if detector is not None:
+                detector.close()
