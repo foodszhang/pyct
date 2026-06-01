@@ -48,6 +48,25 @@ def _rigid_transform(points, rx_deg, ry_deg, rz_deg, translation):
     return points @ rotation.T + np.asarray(translation, dtype=np.float64)
 
 
+def _project_with_cone_vec(vectors, point, u0, v0):
+    """Project a 3D point using one ASTRA cone_vec entry."""
+    src = vectors[0:3]
+    det = vectors[3:6]
+    u_vec = vectors[6:9]
+    v_vec = vectors[9:12]
+    n_hat = np.cross(u_vec, v_vec)
+    ray = point - src
+    denom = np.dot(n_hat, ray)
+    if np.abs(denom) < 1e-10:
+        return None
+    t = np.dot(det - src, n_hat) / denom
+    hit = src + t * ray
+    delta = hit - det
+    basis = np.column_stack([u_vec, v_vec])
+    coeff = np.linalg.lstsq(basis, delta, rcond=None)[0]
+    return u0 + coeff[0], v0 + coeff[1]
+
+
 class Calibration:
     def __init__(self, proj_path, dpixel, num, w, h, config=None):
         self.proj_path = proj_path
@@ -355,7 +374,7 @@ class Calibration:
             points = bead_points[i]
             if len(points) < 3:
                 continue
-            ellipse = cv2.fitEllipse(np.array(points))
+            ellipse = cv2.fitEllipse(np.asarray(points, dtype=np.float32))
             cv2.ellipse(self.zero_img, ellipse, (122, 122, 122), 1)
             theta = ellipse[2] / 180 * np.pi
             ellipses.append(ellipse)
@@ -436,6 +455,8 @@ class Calibration:
         SOD_cal, SDD_cal, u0_cal, v0_cal, theta_cal = self.calculate(observations)
 
         du = dv = self.dpixel
+        spacing = self.config.get("beadSpacing")
+        spacing = float(spacing) if spacing is not None else None
         bead_positions, u0_est = self.estimate_bead_positions(
             observations, SOD_cal, SDD_cal, u0_cal, v0_cal, du
         )
@@ -485,10 +506,17 @@ class Calibration:
         )
         print(f"[CalibResult] theta_cal_deg={theta_cal_deg:.6f}")
         print(f"[CalibResult] detector_roll_deg={detector_roll_deg:.6f}")
+        bead_z_estimated = refined_positions[:, 2]
+        bead_z_from_index = None
+        if spacing is not None:
+            center = (self.num - 1) / 2.0
+            bead_z_from_index = np.asarray(
+                [(center - k) * spacing for k in range(self.num)], dtype=np.float64
+            )
         self._write_residual_diagnostics(
             "vshift",
             observations,
-            refined_positions[:, 2],
+            bead_z_estimated,
             lambda phi, bead_idx: reproject(
                 refined_positions[bead_idx],
                 phi,
@@ -503,6 +531,8 @@ class Calibration:
                 best_vs,
                 detector_roll_deg,
             ),
+            z_label="bead_z_estimated",
+            bead_z_from_index=bead_z_from_index,
         )
 
         return {
@@ -568,7 +598,9 @@ class Calibration:
         known = np.zeros((self.num, 3), dtype=np.float64)
         center = (self.num - 1) / 2.0
         for k in range(self.num):
-            known[k, 2] = (k - center) * spacing
+            # Detection orders beads by image v from top to bottom. In reproject(),
+            # positive physical z projects upward, so bead z decreases with index.
+            known[k, 2] = (center - k) * spacing
 
         n_geom = 9
         x0 = np.zeros(15, dtype=np.float64)
@@ -617,6 +649,10 @@ class Calibration:
             100.0,
             100.0,
         ])
+        obs_phis = np.asarray([obs[0] for obs in observations], dtype=np.float64)
+        obs_bead_idx = np.asarray([obs[1] for obs in observations], dtype=np.intp)
+        obs_u = np.asarray([obs[2] for obs in observations], dtype=np.float64)
+        obs_v = np.asarray([obs[3] for obs in observations], dtype=np.float64)
 
         def residuals(params):
             params = params.copy()
@@ -629,27 +665,24 @@ class Calibration:
                 return np.ones(len(observations) * 2) * 1e4
             points = _rigid_transform(known, params[9], params[10], params[11], params[12:15])
             angle_offset = np.deg2rad(params[8])
-            res = []
-            for phi, bead_idx, u_meas, v_meas in observations:
-                proj = reproject(
-                    points[bead_idx],
-                    phi + angle_offset,
-                    params[0],
-                    params[1],
-                    params[2],
-                    params[3],
-                    params[4],
-                    du,
-                    dv,
-                    params[5],
-                    params[6],
-                    params[7],
-                )
-                if proj is None:
-                    res.extend([0.0, 0.0])
-                else:
-                    res.extend([proj[0] - u_meas, proj[1] - v_meas])
-            return np.asarray(res)
+            u_proj, v_proj, valid = _reproject_many(
+                points[obs_bead_idx],
+                obs_phis + angle_offset,
+                params[0],
+                params[1],
+                params[2],
+                params[3],
+                params[4],
+                du,
+                dv,
+                params[5],
+                params[6],
+                params[7],
+            )
+            res = np.zeros((len(observations), 2), dtype=np.float64)
+            res[valid, 0] = u_proj[valid] - obs_u[valid]
+            res[valid, 1] = v_proj[valid] - obs_v[valid]
+            return res.ravel()
 
         x0 = np.clip(x0, lb, ub)
         result = least_squares(
@@ -690,6 +723,7 @@ class Calibration:
                 params[6],
                 params[7],
             ),
+            z_label="bead_z_nominal",
         )
 
         sx = 0.5
@@ -751,7 +785,15 @@ class Calibration:
             },
         }
 
-    def _write_residual_diagnostics(self, method, observations, bead_z_nominal, project_func):
+    def _write_residual_diagnostics(
+        self,
+        method,
+        observations,
+        bead_z_values,
+        project_func,
+        z_label="bead_z_nominal",
+        bead_z_from_index=None,
+    ):
         diag_dir = os.path.join(self.proj_path, "diagnostics")
         os.makedirs(diag_dir, exist_ok=True)
         rows = []
@@ -766,7 +808,8 @@ class Calibration:
             rows.append({
                 "method": method,
                 "bead_idx": bead_idx,
-                "bead_z_nominal": float(bead_z_nominal[bead_idx]),
+                z_label: float(bead_z_values[bead_idx]),
+                "bead_z_from_index": "" if bead_z_from_index is None else float(bead_z_from_index[bead_idx]),
                 "angle_deg": angle_deg,
                 "u_meas": float(u_meas),
                 "v_meas": float(v_meas),
@@ -779,10 +822,11 @@ class Calibration:
 
         with open(os.path.join(diag_dir, f"residual_by_observation_{method}.csv"), "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow([
+            keys = [
                 "method",
                 "bead_idx",
-                "bead_z_nominal",
+                z_label,
+                "bead_z_from_index",
                 "angle_deg",
                 "u_meas",
                 "v_meas",
@@ -791,21 +835,12 @@ class Calibration:
                 "u_res",
                 "v_res",
                 "total_err",
-            ])
+            ]
+            if bead_z_from_index is None:
+                keys.remove("bead_z_from_index")
+            writer.writerow(keys)
             for row in rows:
-                writer.writerow([row[key] for key in [
-                    "method",
-                    "bead_idx",
-                    "bead_z_nominal",
-                    "angle_deg",
-                    "u_meas",
-                    "v_meas",
-                    "u_proj",
-                    "v_proj",
-                    "u_res",
-                    "v_res",
-                    "total_err",
-                ]])
+                writer.writerow([row[key] for key in keys])
 
         bead_summary = []
         for bead_idx in sorted(set(row["bead_idx"] for row in rows)):
@@ -816,7 +851,8 @@ class Calibration:
             bead_summary.append({
                 "method": method,
                 "bead_idx": bead_idx,
-                "bead_z_nominal": float(bead_z_nominal[bead_idx]),
+                z_label: float(bead_z_values[bead_idx]),
+                "bead_z_from_index": "" if bead_z_from_index is None else float(bead_z_from_index[bead_idx]),
                 "rms_u": float(np.sqrt(np.mean(u_res**2))),
                 "rms_v": float(np.sqrt(np.mean(v_res**2))),
                 "rms_total": float(np.sqrt(np.mean(total**2))),
@@ -829,7 +865,9 @@ class Calibration:
 
         with open(os.path.join(diag_dir, f"residual_summary_by_bead_{method}.csv"), "w", newline="") as f:
             writer = csv.writer(f)
-            keys = ["method", "bead_idx", "bead_z_nominal", "rms_u", "rms_v", "rms_total", "mean_u", "mean_v", "std_u", "std_v", "count"]
+            keys = ["method", "bead_idx", z_label, "bead_z_from_index", "rms_u", "rms_v", "rms_total", "mean_u", "mean_v", "std_u", "std_v", "count"]
+            if bead_z_from_index is None:
+                keys.remove("bead_z_from_index")
             writer.writerow(keys)
             for row in bead_summary:
                 writer.writerow([row[key] for key in keys])
@@ -856,26 +894,30 @@ class Calibration:
 
         trends = []
         if len(bead_summary) >= 2:
-            z = np.asarray([row["bead_z_nominal"] for row in bead_summary], dtype=np.float64)
+            z = np.asarray([row[z_label] for row in bead_summary], dtype=np.float64)
             metrics = [
                 ("rms_total", np.asarray([row["rms_total"] for row in bead_summary], dtype=np.float64)),
                 ("mean_v_res", np.asarray([row["mean_v"] for row in bead_summary], dtype=np.float64)),
                 ("mean_u_res", np.asarray([row["mean_u"] for row in bead_summary], dtype=np.float64)),
             ]
+            low = min(bead_summary, key=lambda row: row[z_label])
+            high = max(bead_summary, key=lambda row: row[z_label])
+            z_warning = (
+                high["rms_total"] > low["rms_total"] * 1.2
+                and high["rms_total"] - low["rms_total"] > 0.5
+            )
             for name, values in metrics:
                 slope, intercept = np.polyfit(z, values, 1)
                 warning = ""
-                if name == "rms_total" and slope > 0.01:
+                if name == "rms_total" and z_warning:
                     warning = "residual_increases_with_height"
-                trends.append([method, name, float(slope), float(intercept), float(abs(slope)), warning])
-            low = min(bead_summary, key=lambda row: row["bead_z_nominal"])
-            high = max(bead_summary, key=lambda row: row["bead_z_nominal"])
-            if high["rms_total"] > low["rms_total"] * 1.2:
+                trends.append([method, z_label, name, float(slope), float(intercept), float(abs(slope)), warning])
+            if z_warning:
                 print("[Warn] Residual increases with bead height. Possible rotation-axis tilt or detector roll not modeled.")
 
         with open(os.path.join(diag_dir, f"residual_z_trend_{method}.csv"), "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["method", "metric", "slope", "intercept", "abs_slope", "warning"])
+            writer.writerow(["method", "z_source", "metric", "slope", "intercept", "abs_slope", "warning"])
             writer.writerows(trends)
 
 
@@ -917,6 +959,59 @@ def reproject(
     return (u_proj, v_proj)
 
 
+def _reproject_many(
+    points,
+    phis,
+    SOD,
+    SDD,
+    u0,
+    v0,
+    eta,
+    du,
+    dv,
+    vc=0.0,
+    vs=0.0,
+    detector_roll_deg=0.0,
+):
+    """Vectorized equivalent of reproject() for optimizer residuals."""
+    points = np.asarray(points, dtype=np.float64)
+    phis = np.asarray(phis, dtype=np.float64)
+    sp = np.sin(phis)
+    cp = np.cos(phis)
+    zeros = np.zeros_like(phis)
+    ODD = SDD - SOD
+
+    src = np.column_stack([sp * SOD, -cp * SOD, zeros])
+    det0 = np.column_stack([-sp * ODD, cp * ODD, zeros])
+    u_base = np.column_stack([cp, sp, zeros])
+    v_base = np.column_stack([-eta * sp, eta * cp, -np.ones_like(phis)])
+    gamma = np.deg2rad(detector_roll_deg)
+    u_dir = np.cos(gamma) * u_base + np.sin(gamma) * v_base
+    v_dir = -np.sin(gamma) * u_base + np.cos(gamma) * v_base
+    n_hat = np.cross(u_dir, v_dir)
+
+    ray = points - src
+    denom = np.einsum("ij,ij->i", n_hat, ray)
+    valid = np.abs(denom) >= 1e-10
+    safe_denom = np.where(valid, denom, 1.0)
+    t = np.einsum("ij,ij->i", det0 - src, n_hat) / safe_denom
+    delta = src + t[:, None] * ray - det0
+
+    aa = np.einsum("ij,ij->i", u_dir, u_dir)
+    ab = np.einsum("ij,ij->i", u_dir, v_dir)
+    bb = np.einsum("ij,ij->i", v_dir, v_dir)
+    rhs_u = np.einsum("ij,ij->i", u_dir, delta)
+    rhs_v = np.einsum("ij,ij->i", v_dir, delta)
+    basis_det = aa * bb - ab * ab
+    valid &= np.abs(basis_det) >= 1e-12
+    safe_basis_det = np.where(valid, basis_det, 1.0)
+    coeff_u = (rhs_u * bb - rhs_v * ab) / safe_basis_det
+    coeff_v = (rhs_v * aa - rhs_u * ab) / safe_basis_det
+    u_proj = u0 + coeff_u / du
+    v_proj = v0 + coeff_v / dv + vc * cp + vs * sp
+    return u_proj, v_proj, valid
+
+
 def debug_compare_reproject_vs_conevec(
     SOD=900.0,
     SDD=1000.0,
@@ -929,28 +1024,55 @@ def debug_compare_reproject_vs_conevec(
     du=0.0748,
     dv=0.0748,
 ):
-    """Debug helper for calibration/reconstruction geometry sign conventions."""
+    """Compare calibration.reproject against ConeBeam.build_cone_vec."""
+    from algorithm.astra.conebeam import ConeBeam
+
     print("[GeometryCheck] roll positive rotates u toward v")
     print("[GeometryCheck] v_shift convention: conebeam uses -(vc*cos(phi)+vs*sin(phi))")
-    for angle_deg in (0.0, 45.0, 90.0):
-        phi = np.deg2rad(angle_deg)
-        gamma = np.deg2rad(detector_roll_deg)
-        u_base = np.array([np.cos(phi), np.sin(phi), 0.0])
-        v_base = np.array([-eta * np.sin(phi), eta * np.cos(phi), -1.0])
-        u_dir = np.cos(gamma) * u_base + np.sin(gamma) * v_base
-        v_dir = -np.sin(gamma) * u_base + np.cos(gamma) * v_base
-        P = np.array([10.0, 5.0, 3.0])
-        proj = reproject(P, phi, SOD, SDD, u0, v0, eta, du, dv, vc, vs, detector_roll_deg)
-        if proj is None:
-            raise RuntimeError("Geometry check projection failed")
-        v_shift_cal = vc * np.cos(phi) + vs * np.sin(phi)
-        v_shift_conevec = -v_shift_cal
-        if not np.allclose(u_dir, np.cos(gamma) * u_base + np.sin(gamma) * v_base):
-            raise RuntimeError("Geometry check roll convention failed")
-        print(
-            f"[GeometryCheck] angle={angle_deg:.1f} u_dir={u_dir} v_dir={v_dir} "
-            f"proj={proj} conevec_shift_v_pix={v_shift_conevec:.6f}"
-        )
+    checker = ConeBeam.__new__(ConeBeam)
+    checker.pixel_size_raw = du
+    checker.sx = 1.0
+    checker.sy = du / dv
+    checker.voxel_size = 1.0
+    checker.TN = int(max(2048.0, np.ceil(u0 * 2.0 + 16.0)))
+    checker.TM = int(max(2048.0, np.ceil(v0 * 2.0 + 16.0)))
+
+    angles = np.deg2rad(np.asarray([0.0, 45.0, 90.0], dtype=np.float64))
+    points = [
+        np.array([10.0, 5.0, 3.0], dtype=np.float64),
+        np.array([-12.0, 8.0, -4.0], dtype=np.float64),
+        np.array([2.0, -15.0, 7.0], dtype=np.float64),
+    ]
+    vectors = checker.build_cone_vec(
+        angles,
+        SOD,
+        SDD,
+        u0,
+        v0,
+        eta=eta,
+        vc=vc,
+        vs=vs,
+        rotation=detector_roll_deg,
+    )
+
+    max_abs_du = 0.0
+    max_abs_dv = 0.0
+    for angle_idx, phi in enumerate(angles):
+        for point in points:
+            reproj_uv = reproject(point, phi, SOD, SDD, u0, v0, eta, du, dv, vc, vs, detector_roll_deg)
+            cone_uv = _project_with_cone_vec(vectors[angle_idx], point, checker.TN / 2.0, checker.TM / 2.0)
+            if reproj_uv is None or cone_uv is None:
+                raise RuntimeError("Geometry check projection failed")
+            abs_du = abs(reproj_uv[0] - cone_uv[0])
+            abs_dv = abs(reproj_uv[1] - cone_uv[1])
+            max_abs_du = max(max_abs_du, abs_du)
+            max_abs_dv = max(max_abs_dv, abs_dv)
+            if abs_du > 1e-4 or abs_dv > 1e-4:
+                raise RuntimeError(
+                    f"Geometry check failed: angle={np.rad2deg(phi):.1f}, "
+                    f"point={point.tolist()}, du={abs_du:.6g}, dv={abs_dv:.6g}"
+                )
+    print(f"[GeometryCheck] max_abs_du={max_abs_du:.6g}, max_abs_dv={max_abs_dv:.6g}")
     print("[GeometryCheck] calibration/reconstruction convention check passed")
 
 
@@ -1004,6 +1126,10 @@ def joint_optimize(
         for i in range(3):
             lb[base + i] = init_positions[k, i] - 50.0
             ub[base + i] = init_positions[k, i] + 50.0
+    obs_phis = np.asarray([obs[0] for obs in observations], dtype=np.float64)
+    obs_bead_idx = np.asarray([obs[1] for obs in observations], dtype=np.intp)
+    obs_u = np.asarray([obs[2] for obs in observations], dtype=np.float64)
+    obs_v = np.asarray([obs[3] for obs in observations], dtype=np.float64)
 
     def residuals(params):
         eta = params[0]
@@ -1011,18 +1137,24 @@ def joint_optimize(
         SDD = params[2]
         vc = params[3]
         vs = params[4]
-        res = []
-        for phi, bead_idx, u_meas, v_meas in observations:
-            bead_params = params[n_geom + bead_idx * 3 : n_geom + (bead_idx + 1) * 3]
-            P = np.array(bead_params)
-            proj = reproject(P, phi, SOD, SDD, u0_fixed, v0_fixed, eta, du, dv, vc, vs)
-            if proj is not None:
-                res.append(proj[0] - u_meas)
-                res.append(proj[1] - v_meas)
-            else:
-                res.append(0.0)
-                res.append(0.0)
-        return np.array(res)
+        positions = params[n_geom:].reshape(n_beads, 3)
+        u_proj, v_proj, valid = _reproject_many(
+            positions[obs_bead_idx],
+            obs_phis,
+            SOD,
+            SDD,
+            u0_fixed,
+            v0_fixed,
+            eta,
+            du,
+            dv,
+            vc,
+            vs,
+        )
+        res = np.zeros((len(observations), 2), dtype=np.float64)
+        res[valid, 0] = u_proj[valid] - obs_u[valid]
+        res[valid, 1] = v_proj[valid] - obs_v[valid]
+        return res.ravel()
 
     x0 = np.clip(x0, lb, ub)
 

@@ -704,13 +704,6 @@
          </layout>
         </widget>
        </item>
-       <item>
-        <widget class="QCheckBox" name="useScanCheckBox">
-         <property name="text">
-          <string>使用采集数据重建（不勾选自动选择当前项目文件下文件进行重建）</string>
-         </property>
-        </widget>
-       </item>
       </layout>
      </widget>
     </widget>

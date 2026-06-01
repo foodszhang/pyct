@@ -15,37 +15,47 @@ CalibrationParam:
   method: vshift
   useSuspiciousBeads: false
 ReconParam:
-  SDD: '978.11'
-  SOD: '910.7'
+  SDD: '964.94'
+  SOD: '901.99'
   angle: '1'
-  columnCount: '512'
-  detectorX: '751.77'
-  detectorY: '1013.91'
+  columnCount: '768'
+  detectorX: '921.816869'
+  detectorY: '477.78'
   rescale_intercept: -502.588
   rescale_slope: -7.99
-  rotation: '0.2'
-  rowCount: '512'
+  rotation: '0.0'
+  rowCount: '972'
   voxelPixelSize: '0.25'
   voxelSizeX: '512'
   voxelSizeY: '512'
   voxelSizeZ: '512'
-  xSpacing: '0.2244'
-  ySpacing: '0.284'
+  xSpacing: '0.0748'
+  ySpacing: '0.0748'
 ZolixMcController:
   baudrate: 19200
   port: COM4
   timeout: 400
 CalibResult:
-  SOD: 908.8
-  SDD: 959.6
-  u0_raw: 916.88
-  v0_raw: 1013.91
-  eta: 0.0
-  vc_raw: -11.381
-  vs_raw: -14.868
+  SOD: 901.99
+  SDD: 964.94
+  angle_offset_deg: 0.0
+  detector_roll_deg: 0.0
+  u0_cal: 918.43
+  u0_est: 921.816869
+  u0_raw: 921.82
+  u0_used: 921.816869
+  v0_raw: 477.78
+  v0_used: 477.78
+  theta_cal_deg: 0.23
+  roll_source: disabled_for_legacy
+  eta: 0.000363
+  vc_raw: 1.126418
+  vs_raw: 0.181771
+  rms_init: 0.9872
+  rms_final: 0.72
   sx: 0.5
   sy: 0.5
-  u0_recon: 458.44
-  v0_recon: 506.96
-  vc_recon: -5.691
-  vs_recon: -7.434
+  u0_recon: 460.91
+  v0_recon: 238.89
+  vc_recon: 0.563209
+  vs_recon: 0.090886

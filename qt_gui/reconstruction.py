@@ -175,16 +175,14 @@ class ReconWorker(QThread):
                 vol_center_y=p["vol_center_y"],
                 vol_center_z=p["vol_center_z"],
             )
-            if p["use_scan"]:
-                cb.load_from_dict(self.parent_window.scan_window.img_dict)
-            else:
-                self.progress.emit(5, "正在加载投影...")
-                cb.load_img(
-                    angle_from_filename=True,
-                    progress_callback=lambda cur, tot, stage: self.progress.emit(
-                        int(cur / tot * 60), f"加载投影 {cur}/{tot}"
-                    ),
-                )
+            self.progress.emit(5, "正在加载投影...")
+            cb.load_img(
+                angle_from_filename=True,
+                drop_duplicate_360=True,
+                progress_callback=lambda cur, tot, stage: self.progress.emit(
+                    int(cur / tot * 60), f"加载投影 {cur}/{tot}"
+                ),
+            )
             self.progress.emit(65, "构建几何...")
             if p.get("ring_correction"):
                 self.progress.emit(70, "环形伪影校正...")
@@ -244,9 +242,6 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         )
         self.sdd_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "SDDLineEdit")
         self.sod_line_edit = self.ui.findChild(QtWidgets.QLineEdit, "SODLineEdit")
-        self.use_scan_check_box = self.ui.findChild(
-            QtWidgets.QCheckBox, "useScanCheckBox"
-        )
         self.voxel_pixel_size_line_edit = self.ui.findChild(
             QtWidgets.QLineEdit, "voxelPixelSizeLineEdit"
         )
@@ -453,9 +448,6 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.non_neg_check.setToolTip(tip)
         self.ui.findChild(QtWidgets.QLabel, "labelNonNeg").setToolTip(tip)
 
-        tip = "勾选后使用当前扫描窗口中已采集的投影数据重建。\n不勾选则从项目目录下自动读取投影文件。"
-        self.use_scan_check_box.setToolTip(tip)
-
     def init_from_config(self):
         config = Config.get("ReconParam", None)
         if not config:
@@ -560,7 +552,6 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             "detector_y": float(self.detector_y_line_edit.text()),
             "rotation": float(self.rotation_line_edit.text()),
             "angle_offset_deg": float(calib.get("angle_offset_deg", 0.0)),
-            "use_scan": self.use_scan_check_box.isChecked(),
             "rescale_slope": self.rescale_slope,
             "rescale_intercept": self.rescale_intercept,
             "proj_path": self.parent_window.project_path,
