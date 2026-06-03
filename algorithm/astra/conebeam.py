@@ -11,8 +11,11 @@ from threading import Lock
 def _ckpt(msg: str):
     """写入检查点日志"""
     log_path = pathlib.Path.home() / "pyct_crash.log"
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(f"[{datetime.datetime.now()}] {msg}\n")
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.datetime.now()}] {msg}\n")
+    except OSError:
+        pass
 
 
 def _cuda_available() -> bool:
@@ -451,9 +454,10 @@ class ConeBeam:
             for row in range(self.data.shape[0]):
                 sino_row = self.data[row, :, :]
                 row_mean = sino_row.mean(axis=0)
-                row_mean_filtered = median_filter(row_mean, size=(ring_kernel_size,))
+                row_mean_filtered = median_filter(row_mean, size=ring_kernel_size)
                 correction = row_mean - row_mean_filtered
                 self.data[row, :, :] -= correction[np.newaxis, :]
+            ast.data3d.store(self.proj_id, self.data)
             print(f"[Preprocess] 环形伪影校正完成，核大小={ring_kernel_size}")
 
         filter_map = {

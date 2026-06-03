@@ -81,3 +81,5 @@ astra_pkg/
 detector_bridge/
 logs/
 2026*/
+*.7z
+*.rar

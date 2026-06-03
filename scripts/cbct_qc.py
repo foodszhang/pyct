@@ -46,6 +46,9 @@ def write_angle_records(ct_dir: Path, out_dir: Path) -> dict:
             if angle in clean_int:
                 f.write(f"{angle},real,{angle},{angle},0\n")
                 continue
+            if not clean_sorted:
+                f.write(f"{angle},missing,,,,\n")
+                continue
             right_idx = np.searchsorted(clean_sorted, angle, side="right")
             if right_idx <= 0:
                 left = clean_sorted[-1]
@@ -262,14 +265,20 @@ def motion_qc(ct_dir: Path, out_dir: Path) -> dict:
         arr_diff = np.array([r["adjacent_diff"] for r in rows], dtype=np.float32)
         arr_shift = np.array([r["phase_shift_norm"] for r in rows], dtype=np.float32)
         med_area = float(np.median(arr_area))
+        mad_area = float(np.median(np.abs(arr_area - med_area)) + 1e-6)
         mad_diff = float(np.median(np.abs(arr_diff - np.median(arr_diff))) + 1e-6)
+        mad_shift = float(np.median(np.abs(arr_shift - np.median(arr_shift))) + 1e-6)
         for r in rows:
             area_frac = abs(r["area"] - med_area) / max(med_area, 1.0)
+            area_z = abs(r["area"] - med_area) / (1.4826 * mad_area)
             diff_z = abs(r["adjacent_diff"] - float(np.median(arr_diff))) / (1.4826 * mad_diff)
-            severe = area_frac > 0.25 or r["phase_shift_norm"] > 8.0 or diff_z > 5.0
-            suspicious = severe or area_frac > 0.15 or r["phase_shift_norm"] > 4.0 or diff_z > 3.5
+            shift_z = abs(r["phase_shift_norm"] - float(np.median(arr_shift))) / (1.4826 * mad_shift)
+            severe = area_z > 5.0 or shift_z > 5.0 or diff_z > 5.0
+            suspicious = severe or area_z > 3.5 or shift_z > 3.5 or diff_z > 3.5
             r["area_frac_from_median"] = area_frac
+            r["area_robust_z"] = area_z
             r["diff_robust_z"] = diff_z
+            r["phase_shift_robust_z"] = shift_z
             r["suspicious"] = int(suspicious)
             r["severe"] = int(severe)
 
@@ -463,16 +472,23 @@ def main() -> int:
             fov_info = volume_qc(volume_path, out_dir, voxel_size)
             if not args.skip_mask:
                 denoise_and_mask(volume_path, out_dir)
-        quality = "reliable"
-        if angle_info["missing_count"] > 90 or motion_info["severe_count"] > 0:
+        clean_count = max(angle_info["clean_count"], 1)
+        severe_ratio = motion_info["severe_count"] / clean_count
+        suspicious_ratio = motion_info["suspicious_count"] / clean_count
+        quality = "candidate_for_reconstruction"
+        if angle_info["clean_count"] == 0:
+            quality = "missing_ct"
+        elif angle_info["missing_count"] > 90 or severe_ratio > 0.75:
             quality = "low-confidence anatomical support"
-        elif angle_info["missing_count"] > 60 or motion_info["suspicious_count"] > 10:
+        elif severe_ratio > 0.55 or suspicious_ratio > 0.80:
             quality = "review"
         summary.append(
             {
                 "sample": sample_dir.name,
                 **angle_info,
                 **motion_info,
+                "suspicious_ratio": suspicious_ratio,
+                "severe_ratio": severe_ratio,
                 "quality": quality,
                 "volume_exists": int(volume_path.exists()),
                 "border_fraction": fov_info.get("border_fraction", np.nan),
