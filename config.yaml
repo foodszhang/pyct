@@ -17,21 +17,30 @@ CalibrationParam:
 ReconParam:
   SDD: '972.3'
   SOD: '904.95'
+  algorithm: FDK
   angle: '1'
-  columnCount: '768'
+  columnCount: '1536'
   detectorX: '918.49518'
   detectorY: '148.46'
+  fillMissingDegrees: false
+  filterType: Hamming
+  iterations: 50
+  nonNegConstraint: true
+  projectionMedianFilter: true
+  projectionMedianKernel: 3
   rescale_intercept: -502.588
   rescale_slope: -7.99
+  ringCorrection: true
+  ringKernelSize: 15
   rotation: '0.0'
-  roiCenterX: '0.0'
-  roiCenterY: '0.0'
-  roiCenterZ: '-60.0'
-  rowCount: '972'
-  voxelPixelSize: '0.25'
-  voxelSizeX: '512'
-  voxelSizeY: '512'
-  voxelSizeZ: '512'
+  roiCenterX: '4.75'
+  roiCenterY: '20.375'
+  roiCenterZ: '-33.75'
+  rowCount: '1944'
+  voxelPixelSize: '0.1'
+  voxelSizeX: '192'
+  voxelSizeY: '256'
+  voxelSizeZ: '768'
   xSpacing: '0.0748'
   ySpacing: '0.0748'
 ZolixMcController:
@@ -56,9 +65,9 @@ CalibResult:
   vs_raw: -0.158537
   rms_init: 1.0049
   rms_final: 0.7155
-  sx: 0.5
-  sy: 0.5
-  u0_recon: 459.25
-  v0_recon: 74.23
-  vc_recon: 0.601728
-  vs_recon: -0.079268
+  sx: 1.0
+  sy: 1.0
+  u0_recon: 918.49518
+  v0_recon: 148.46
+  vc_recon: 1.203457
+  vs_recon: -0.158537

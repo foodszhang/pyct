@@ -174,11 +174,13 @@ class ReconWorker(QThread):
                 vol_center_x=p["vol_center_x"],
                 vol_center_y=p["vol_center_y"],
                 vol_center_z=p["vol_center_z"],
+                projection_median_kernel=p.get("projection_median_kernel", 0),
             )
             self.progress.emit(5, "正在加载投影...")
             cb.load_img(
                 angle_from_filename=True,
                 drop_duplicate_360=True,
+                fill_missing_degrees=p.get("fill_missing_degrees", False),
                 progress_callback=lambda cur, tot, stage: self.progress.emit(
                     int(cur / tot * 60), f"加载投影 {cur}/{tot}"
                 ),
@@ -296,9 +298,23 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.algorithm_combo = self.ui.findChild(QtWidgets.QComboBox, "algorithmComboBox")
         self.iterations_spin = self.ui.findChild(QtWidgets.QSpinBox, "iterationsSpinBox")
         self.non_neg_check = self.ui.findChild(QtWidgets.QCheckBox, "nonNegConstraintCheckBox")
+        self.projection_median_check = QtWidgets.QCheckBox(self.ui)
+        self.projection_median_spin = QtWidgets.QSpinBox(self.ui)
+        self.projection_median_spin.setMinimum(3)
+        self.projection_median_spin.setMaximum(15)
+        self.projection_median_spin.setSingleStep(2)
+        self.projection_median_spin.setValue(3)
+        self.projection_median_spin.setEnabled(False)
+        self.fill_missing_degrees_check = QtWidgets.QCheckBox(self.ui)
+        advanced_layout = self.ui.findChild(QtWidgets.QFormLayout, "formLayoutAdvanced")
+        if advanced_layout is not None:
+            advanced_layout.addRow("投影中值滤波", self.projection_median_check)
+            advanced_layout.addRow("中值滤波核", self.projection_median_spin)
+            advanced_layout.addRow("补齐缺失角度", self.fill_missing_degrees_check)
 
         # 联动逻辑
         self.ring_correction_check.toggled.connect(self.ring_kernel_spin.setEnabled)
+        self.projection_median_check.toggled.connect(self.projection_median_spin.setEnabled)
         self.algorithm_combo.currentTextChanged.connect(self._on_algorithm_changed)
 
         self.init_from_config()
@@ -448,6 +464,13 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.non_neg_check.setToolTip(tip)
         self.ui.findChild(QtWidgets.QLabel, "labelNonNeg").setToolTip(tip)
 
+        tip = "在原始投影 resize 后、Beer-Lambert 对数变换前做中值滤波。\n当前 luoshu2 推荐使用 3x3，可降低点噪声和软组织颗粒感。"
+        self.projection_median_check.setToolTip(tip)
+        self.projection_median_spin.setToolTip(tip)
+
+        tip = "按相邻真实角度线性插值补齐缺失投影角度。\n完整 0-359 度数据一般不需要；缺角旧数据可开启。"
+        self.fill_missing_degrees_check.setToolTip(tip)
+
     def init_from_config(self):
         config = Config.get("ReconParam", None)
         if not config:
@@ -497,6 +520,17 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         self.roi_center_x_line_edit.setText(str(config.get("roiCenterX", "0.0")))
         self.roi_center_y_line_edit.setText(str(config.get("roiCenterY", "0.0")))
         self.roi_center_z_line_edit.setText(str(config.get("roiCenterZ", "0.0")))
+        self.filter_type_combo.setCurrentText(str(config.get("filterType", "Ram-Lak")))
+        self.ring_correction_check.setChecked(bool(config.get("ringCorrection", False)))
+        self.ring_kernel_spin.setValue(int(config.get("ringKernelSize", 9)))
+        self.ring_kernel_spin.setEnabled(self.ring_correction_check.isChecked())
+        self.algorithm_combo.setCurrentText(str(config.get("algorithm", "FDK")))
+        self.iterations_spin.setValue(int(config.get("iterations", 50)))
+        self.non_neg_check.setChecked(bool(config.get("nonNegConstraint", True)))
+        self.projection_median_check.setChecked(bool(config.get("projectionMedianFilter", False)))
+        self.projection_median_spin.setValue(int(config.get("projectionMedianKernel", 3)))
+        self.projection_median_spin.setEnabled(self.projection_median_check.isChecked())
+        self.fill_missing_degrees_check.setChecked(bool(config.get("fillMissingDegrees", False)))
 
     def save_config(self):
         config = Config.get("ReconParam", None)
@@ -519,6 +553,15 @@ class ReconstrcionDialog(QtWidgets.QDialog):
         config["roiCenterX"] = self.roi_center_x_line_edit.text()
         config["roiCenterY"] = self.roi_center_y_line_edit.text()
         config["roiCenterZ"] = self.roi_center_z_line_edit.text()
+        config["filterType"] = self.filter_type_combo.currentText()
+        config["ringCorrection"] = self.ring_correction_check.isChecked()
+        config["ringKernelSize"] = self.ring_kernel_spin.value()
+        config["algorithm"] = self.algorithm_combo.currentText()
+        config["iterations"] = self.iterations_spin.value()
+        config["nonNegConstraint"] = self.non_neg_check.isChecked()
+        config["projectionMedianFilter"] = self.projection_median_check.isChecked()
+        config["projectionMedianKernel"] = self.projection_median_spin.value()
+        config["fillMissingDegrees"] = self.fill_missing_degrees_check.isChecked()
         Config["ReconParam"] = config
         calib = Config.get("CalibResult", {})
         calib["eta"] = float(self.eta_line_edit.text())
@@ -572,6 +615,12 @@ class ReconstrcionDialog(QtWidgets.QDialog):
             "algorithm": self.algorithm_combo.currentText(),
             "iterations": self.iterations_spin.value(),
             "non_neg_constraint": self.non_neg_check.isChecked(),
+            "projection_median_kernel": (
+                self.projection_median_spin.value()
+                if self.projection_median_check.isChecked()
+                else 0
+            ),
+            "fill_missing_degrees": self.fill_missing_degrees_check.isChecked(),
         }
         self.params = params
         self.accept()

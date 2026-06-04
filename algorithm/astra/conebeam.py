@@ -62,6 +62,10 @@ class ConeBeam:
         air_percentile: float | None = None,
         air_zero_percentile: float | None = None,
         mass_normalize: bool = False,
+        projection_gaussian_sigma: float | None = None,
+        projection_median_kernel: int = 0,
+        intensity_floor: float = 1.0,
+        intensity_clip_percentile: float | None = None,
     ):
         self.SOD = SOD
         self.SDD = SDD
@@ -109,6 +113,11 @@ class ConeBeam:
         self.air_percentile = air_percentile
         self.air_zero_percentile = air_zero_percentile
         self.mass_normalize = mass_normalize
+        self.projection_gaussian_sigma = projection_gaussian_sigma
+        self.projection_median_kernel = projection_median_kernel
+        self.intensity_floor = intensity_floor
+        self.intensity_clip_percentile = intensity_clip_percentile
+        self.projection_preprocess_stats = []
         self.eta = eta
         self.vc = vc
         self.vs = vs
@@ -121,7 +130,90 @@ class ConeBeam:
             f"[Geometry] vol_center = ({self.vol_center_x}, {self.vol_center_y}, {self.vol_center_z}) mm"
         )
 
+    def _preprocess_projection(self, img: np.ndarray) -> tuple[np.ndarray, dict]:
+        simg = img.astype(np.float32)
+        TM, TN = simg.shape
+        self.w = TN
+        self.h = TM
+        interp = cv2.INTER_AREA if (self.TN < TN or self.TM < TM) else cv2.INTER_LINEAR
+        reshaped = cv2.resize(simg, (self.TN, self.TM), interpolation=interp)
+
+        stats = {
+            "raw_min": float(np.min(simg)),
+            "raw_max": float(np.max(simg)),
+            "raw_zero_fraction": float(np.mean(simg <= 0.0)),
+            "raw_saturated_fraction": float(np.mean(simg >= self.I0)),
+        }
+
+        if self.projection_gaussian_sigma is not None and self.projection_gaussian_sigma > 0.0:
+            sigma = float(self.projection_gaussian_sigma)
+            reshaped = cv2.GaussianBlur(
+                reshaped,
+                (0, 0),
+                sigmaX=sigma,
+                sigmaY=sigma,
+                borderType=cv2.BORDER_REPLICATE,
+            )
+
+        if self.projection_median_kernel and self.projection_median_kernel > 1:
+            kernel = int(self.projection_median_kernel)
+            if kernel % 2 == 0:
+                kernel += 1
+            reshaped = cv2.medianBlur(reshaped, kernel)
+
+        clip_hi = self.I0
+        if self.intensity_clip_percentile is not None:
+            clip_hi = float(np.percentile(reshaped, self.intensity_clip_percentile))
+            clip_hi = min(max(clip_hi, 1.0), self.I0)
+        floor = max(float(self.intensity_floor), 1.0)
+        reshaped = np.clip(reshaped, floor, clip_hi)
+
+        I0 = self.I0
+        if self.air_percentile is not None:
+            I0 = float(np.percentile(reshaped, self.air_percentile))
+            I0 = max(I0, 1.0)
+        projection = -np.log(np.clip(reshaped / I0, 1e-6, 1.0))
+        stats.update(
+            {
+                "clip_hi": float(clip_hi),
+                "floor": float(floor),
+                "I0": float(I0),
+                "log_min": float(np.min(projection)),
+                "log_max": float(np.max(projection)),
+                "log_mean": float(np.mean(projection)),
+            }
+        )
+        return projection, stats
+
+    def projection_preprocess_summary(self) -> dict:
+        if not self.projection_preprocess_stats:
+            return {}
+        keys = [
+            "raw_zero_fraction",
+            "raw_saturated_fraction",
+            "clip_hi",
+            "I0",
+            "log_min",
+            "log_max",
+            "log_mean",
+        ]
+        summary = {"count": len(self.projection_preprocess_stats)}
+        for key in keys:
+            values = np.array(
+                [row[key] for row in self.projection_preprocess_stats if key in row],
+                dtype=np.float32,
+            )
+            if values.size == 0:
+                continue
+            summary[key] = {
+                "min": float(np.min(values)),
+                "median": float(np.median(values)),
+                "max": float(np.max(values)),
+            }
+        return summary
+
     def load_from_dict(self, img_dict):
+        self.projection_preprocess_stats = []
         self.data = np.zeros((self.TM, len(img_dict), self.TN), dtype=np.float32)
         img_list = list(img_dict.items())
         img_list = sorted(img_list, key=lambda x: x[0])
@@ -131,22 +223,12 @@ class ConeBeam:
         self.dd_x_recon = self.pixel_size_raw / self.sx
         self.dd_y_recon = self.pixel_size_raw / self.sy
 
-        TM, TN = 0, 0
         for n, v in enumerate(img_list):
             i, img = v
-            simg = img.astype(np.float32)
-            TM, TN = simg.shape
-            self.w = TN
-            self.h = TM
-            interp = cv2.INTER_AREA if (self.TN < TN or self.TM < TM) else cv2.INTER_LINEAR
-            reshaped = cv2.resize(simg, (self.TN, self.TM), interpolation=interp)
-            reshaped = np.clip(reshaped, 1.0, self.I0)
-            I0 = self.I0
-            if self.air_percentile is not None:
-                I0 = float(np.percentile(reshaped, self.air_percentile))
-                I0 = max(I0, 1.0)
-            reshaped = -np.log(np.clip(reshaped / I0, 1e-6, 1.0))
-            self.data[:, n, :] = reshaped
+            projection, stats = self._preprocess_projection(img)
+            stats["angle"] = float(i)
+            self.projection_preprocess_stats.append(stats)
+            self.data[:, n, :] = projection
         angles = [item[0] for item in img_list]
         angles = [(float(i) + self.angle_offset_deg) * np.pi / 180.0 for i in angles]
 
@@ -242,20 +324,11 @@ class ConeBeam:
         TM, TN = 0, 0
         if os.path.exists(full_path):
             img = cv2.imread(full_path, -1)
-            simg = img.astype(np.float32)
-            TM, TN = simg.shape
-            self.w = TN
-            self.h = TM
-            interp = cv2.INTER_AREA if (self.TN < TN or self.TM < TM) else cv2.INTER_LINEAR
-            reshaped = cv2.resize(simg, (self.TN, self.TM), interpolation=interp)
-            reshaped = np.clip(reshaped, 1.0, self.I0)
-            I0 = self.I0
-            if self.air_percentile is not None:
-                I0 = float(np.percentile(reshaped, self.air_percentile))
-                I0 = max(I0, 1.0)
-            reshaped = -np.log(np.clip(reshaped / I0, 1e-6, 1.0))
+            projection, stats = self._preprocess_projection(img)
+            stats["filename"] = filename
             self.data_lock.acquire()
-            self.data[:, number, :] = reshaped
+            self.data[:, number, :] = projection
+            self.projection_preprocess_stats.append(stats)
             self.data_lock.release()
         else:
             print(f"{full_path} not exists")
@@ -267,6 +340,7 @@ class ConeBeam:
         drop_duplicate_360: bool = False,
         fill_missing_degrees: bool = False,
     ):
+        self.projection_preprocess_stats = []
         if angle_from_filename:
             tif_files = [f for f in os.listdir(self.proj_path) if f.endswith(".tif")]
             parsed = []
@@ -428,6 +502,15 @@ class ConeBeam:
 
         print("[Preprocess] Using Beer-Lambert projection: -log(I/I0)")
         print(f"[Preprocess] I0 = {self.I0}")
+        if self.air_percentile is not None:
+            print(f"[Preprocess] air_percentile = {self.air_percentile}")
+        if self.projection_gaussian_sigma is not None:
+            print(f"[Preprocess] gaussian_sigma = {self.projection_gaussian_sigma}")
+        if self.projection_median_kernel:
+            print(f"[Preprocess] median_kernel = {self.projection_median_kernel}")
+        if self.intensity_clip_percentile is not None:
+            print(f"[Preprocess] intensity_clip_percentile = {self.intensity_clip_percentile}")
+        print(f"[Preprocess] intensity_floor = {self.intensity_floor}")
         print(f"[Preprocess] data shape = {self.data.shape}")
         print(f"[Preprocess] data min = {self.data.min():.6f}")
         print(f"[Preprocess] data max = {self.data.max():.6f}")
