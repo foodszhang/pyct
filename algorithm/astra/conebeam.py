@@ -27,6 +27,14 @@ def _cuda_available() -> bool:
         return False
 
 
+def _robust_z(values: np.ndarray) -> np.ndarray:
+    values = values.astype(np.float32, copy=False)
+    med = np.median(values)
+    mad = np.median(np.abs(values - med))
+    scale = 1.4826 * max(float(mad), 1.0e-6)
+    return np.abs(values - med) / scale
+
+
 class ConeBeam:
     def __init__(
         self,
@@ -66,6 +74,11 @@ class ConeBeam:
         projection_median_kernel: int = 0,
         intensity_floor: float = 1.0,
         intensity_clip_percentile: float | None = None,
+        auto_defect_correction: bool = True,
+        dark_filename: str = "dark.tif",
+        empty_filename: str = "empty.tif",
+        defect_pixel_z: float = 8.0,
+        defect_line_z: float = 8.0,
     ):
         self.SOD = SOD
         self.SDD = SDD
@@ -118,6 +131,14 @@ class ConeBeam:
         self.intensity_floor = intensity_floor
         self.intensity_clip_percentile = intensity_clip_percentile
         self.projection_preprocess_stats = []
+        self.auto_defect_correction = auto_defect_correction
+        self.dark_filename = dark_filename
+        self.empty_filename = empty_filename
+        self.defect_pixel_z = defect_pixel_z
+        self.defect_line_z = defect_line_z
+        self.defect_map = None
+        if self.auto_defect_correction:
+            self.defect_map = self._build_auto_defect_map()
         self.eta = eta
         self.vc = vc
         self.vs = vs
@@ -130,8 +151,117 @@ class ConeBeam:
             f"[Geometry] vol_center = ({self.vol_center_x}, {self.vol_center_y}, {self.vol_center_z}) mm"
         )
 
+    def _build_auto_defect_map(self) -> dict | None:
+        dark_path = os.path.join(self.proj_path, self.dark_filename)
+        empty_path = os.path.join(self.proj_path, self.empty_filename)
+        dark = cv2.imread(dark_path, -1)
+        empty = cv2.imread(empty_path, -1)
+        if dark is None or empty is None:
+            print(
+                f"[Warn] 自动坏点坏线校正已启用，但未找到 {self.dark_filename}/{self.empty_filename}"
+            )
+            return None
+        dark = dark.astype(np.float32)
+        empty = empty.astype(np.float32)
+        if dark.shape != empty.shape:
+            print(f"[Warn] dark/empty 尺寸不一致，跳过自动坏点坏线校正: {dark.shape} vs {empty.shape}")
+            return None
+
+        response = empty - dark
+        response = np.where(np.isfinite(response), response, 0.0)
+        valid = response > max(float(np.percentile(response, 5.0)), 1.0)
+        local_response = cv2.medianBlur(response, 5)
+        rel_dev = np.abs(response - local_response) / np.maximum(local_response, 1.0)
+
+        dark_z = _robust_z(dark)
+        response_med = float(np.median(response[valid])) if np.any(valid) else float(np.median(response))
+        response_mad = float(np.median(np.abs(response[valid] - response_med))) if np.any(valid) else 1.0
+        response_scale = 1.4826 * max(response_mad, 1.0e-6)
+        response_z_full = np.abs(response - response_med) / response_scale
+
+        bad_pixels = (
+            (dark_z > self.defect_pixel_z)
+            | (response_z_full > self.defect_pixel_z)
+            | (response <= max(1.0, response_med * 0.05))
+            | ((rel_dev > 0.35) & (response_z_full > 4.0))
+        )
+
+        row_metric = np.median(response, axis=1)
+        col_metric = np.median(response, axis=0)
+        bad_rows = _robust_z(row_metric) > self.defect_line_z
+        bad_cols = _robust_z(col_metric) > self.defect_line_z
+        bad_rows |= row_metric <= max(1.0, response_med * 0.05)
+        bad_cols |= col_metric <= max(1.0, response_med * 0.05)
+
+        # If an entire bad line was found, do not double-count every pixel on it as isolated bad pixels.
+        bad_pixels[bad_rows, :] = False
+        bad_pixels[:, bad_cols] = False
+
+        defect_map = {
+            "shape": dark.shape,
+            "bad_pixels": bad_pixels,
+            "bad_rows": bad_rows,
+            "bad_cols": bad_cols,
+            "response_median": response_med,
+            "bad_pixel_count": int(np.count_nonzero(bad_pixels)),
+            "bad_row_count": int(np.count_nonzero(bad_rows)),
+            "bad_col_count": int(np.count_nonzero(bad_cols)),
+        }
+        print(
+            "[Defect] 自动坏点坏线检测完成: "
+            f"bad_pixels={defect_map['bad_pixel_count']}, "
+            f"bad_rows={defect_map['bad_row_count']}, "
+            f"bad_cols={defect_map['bad_col_count']}"
+        )
+        return defect_map
+
+    def _interpolate_bad_lines(self, img: np.ndarray, bad_rows: np.ndarray, bad_cols: np.ndarray) -> np.ndarray:
+        out = img.copy()
+        good_rows = np.flatnonzero(~bad_rows)
+        for row in np.flatnonzero(bad_rows):
+            if good_rows.size == 0:
+                break
+            left = good_rows[good_rows < row]
+            right = good_rows[good_rows > row]
+            if left.size and right.size:
+                out[row, :] = 0.5 * (out[left[-1], :] + out[right[0], :])
+            elif left.size:
+                out[row, :] = out[left[-1], :]
+            elif right.size:
+                out[row, :] = out[right[0], :]
+
+        good_cols = np.flatnonzero(~bad_cols)
+        for col in np.flatnonzero(bad_cols):
+            if good_cols.size == 0:
+                break
+            left = good_cols[good_cols < col]
+            right = good_cols[good_cols > col]
+            if left.size and right.size:
+                out[:, col] = 0.5 * (out[:, left[-1]] + out[:, right[0]])
+            elif left.size:
+                out[:, col] = out[:, left[-1]]
+            elif right.size:
+                out[:, col] = out[:, right[0]]
+        return out
+
+    def _repair_defects(self, img: np.ndarray) -> np.ndarray:
+        if not self.defect_map or img.shape != self.defect_map["shape"]:
+            return img
+        repaired = self._interpolate_bad_lines(
+            img,
+            self.defect_map["bad_rows"],
+            self.defect_map["bad_cols"],
+        )
+        bad_pixels = self.defect_map["bad_pixels"]
+        if np.any(bad_pixels):
+            median_img = cv2.medianBlur(repaired, 3)
+            repaired[bad_pixels] = median_img[bad_pixels]
+        return repaired
+
     def _preprocess_projection(self, img: np.ndarray) -> tuple[np.ndarray, dict]:
         simg = img.astype(np.float32)
+        if self.auto_defect_correction:
+            simg = self._repair_defects(simg)
         TM, TN = simg.shape
         self.w = TN
         self.h = TM
@@ -143,6 +273,7 @@ class ConeBeam:
             "raw_max": float(np.max(simg)),
             "raw_zero_fraction": float(np.mean(simg <= 0.0)),
             "raw_saturated_fraction": float(np.mean(simg >= self.I0)),
+            "defect_correction": bool(self.auto_defect_correction and self.defect_map is not None),
         }
 
         if self.projection_gaussian_sigma is not None and self.projection_gaussian_sigma > 0.0:
@@ -209,6 +340,13 @@ class ConeBeam:
                 "min": float(np.min(values)),
                 "median": float(np.median(values)),
                 "max": float(np.max(values)),
+            }
+        if self.defect_map is not None:
+            summary["defect_map"] = {
+                "bad_pixels": self.defect_map["bad_pixel_count"],
+                "bad_rows": self.defect_map["bad_row_count"],
+                "bad_cols": self.defect_map["bad_col_count"],
+                "response_median": self.defect_map["response_median"],
             }
         return summary
 

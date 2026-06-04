@@ -116,12 +116,11 @@ class ScanWindow(QtWidgets.QDialog):
     def detector_receive(self, conn):
         dark = None
         empty = None
-        max_dark = None
+        denominator = None
         if self.projection_normalized:
             dark = self.dark_img
             empty = self.empty_img
-            max_dark = np.max(dark)
-            empty = np.where(empty <= max_dark, max_dark + 1, empty)
+            denominator = np.maximum(empty - dark, 1.0)
         try:
             while True:
                 cnt, buf = conn.recv()
@@ -133,7 +132,7 @@ class ScanWindow(QtWidgets.QDialog):
                 ar = np.frombuffer(buf, dtype=np.uint16).reshape(w, h)
                 ar = np.flip(ar, axis=0)
                 if self.projection_normalized:
-                    ar_norm = np.clip((ar.astype(np.float32) - dark) / (empty - dark), 0, 1)
+                    ar_norm = np.clip((ar.astype(np.float32) - dark) / denominator, 0, 1)
                     ar_for_recon = ar_norm * 65535.0
                     show_ar = cv2.resize(ar_norm, (800, 800))
                 else:

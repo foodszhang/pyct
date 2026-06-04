@@ -226,6 +226,10 @@ def main() -> int:
     parser.add_argument("--projection-median-kernel", type=int, default=0)
     parser.add_argument("--intensity-floor", type=float, default=1.0)
     parser.add_argument("--intensity-clip-percentile", type=float)
+    parser.add_argument("--auto-defect-correction", dest="auto_defect_correction", action="store_true", default=True)
+    parser.add_argument("--no-auto-defect-correction", dest="auto_defect_correction", action="store_false")
+    parser.add_argument("--dark-filename", default="dark.tif")
+    parser.add_argument("--empty-filename", default="empty.tif")
     parser.add_argument("--fixed-soft-window", nargs=2, type=float)
     parser.add_argument("--fixed-bone-window", nargs=2, type=float)
     parser.add_argument(
@@ -291,6 +295,9 @@ def main() -> int:
         projection_median_kernel=args.projection_median_kernel,
         intensity_floor=args.intensity_floor,
         intensity_clip_percentile=args.intensity_clip_percentile,
+        auto_defect_correction=args.auto_defect_correction,
+        dark_filename=args.dark_filename,
+        empty_filename=args.empty_filename,
     )
     cb.load_img(
         angle_from_filename=True,
@@ -337,6 +344,9 @@ def main() -> int:
             "projection_median_kernel": args.projection_median_kernel,
             "intensity_floor": args.intensity_floor,
             "intensity_clip_percentile": args.intensity_clip_percentile,
+            "auto_defect_correction": args.auto_defect_correction,
+            "dark_filename": args.dark_filename,
+            "empty_filename": args.empty_filename,
         },
         "projection_preprocess_summary": cb.projection_preprocess_summary(),
         "roi_bounds": roi_bounds,
