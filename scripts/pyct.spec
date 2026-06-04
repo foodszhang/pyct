@@ -30,6 +30,9 @@ for f in os.listdir(qt_gui_dir):
 data_files = ui_files + [
     (os.path.join(repo_root, 'config.yaml'), 'config'),
 ]
+default_config = os.path.join(repo_root, 'config', 'default_config.yaml')
+if os.path.exists(default_config):
+    data_files.append((default_config, 'config'))
 
 for f in ['custom_layout.ini', 'user_custom_layout.ini']:
     path = os.path.join(repo_root, f)

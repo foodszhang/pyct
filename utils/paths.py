@@ -12,6 +12,108 @@ import os
 import sys
 
 
+def _recommended_default_config() -> dict:
+    return {
+        "BrightController": {"baudrate": 38400, "port": "COM3", "timeout": 4},
+        "CalibrationParam": {
+            "BBNumber": 6,
+            "allowLineAngleOffsetFit": False,
+            "allowLineRollFit": False,
+            "applyLegacyThetaAsRoll": False,
+            "beadLayout": "line_z",
+            "beadSpacing": 10.0,
+            "detectorHeight": 1944,
+            "detectorPixelSize": 0.0748,
+            "detectorWidth": 1536,
+            "method": "vshift",
+            "useSuspiciousBeads": False,
+        },
+        "ReconParam": {
+            "SDD": "972.3",
+            "SOD": "904.95",
+            "algorithm": "FDK",
+            "angle": "1",
+            "columnCount": "1536",
+            "detectorX": "918.49518",
+            "detectorY": "148.46",
+            "fillMissingDegrees": False,
+            "filterType": "Hamming",
+            "iterations": 50,
+            "nonNegConstraint": True,
+            "projectionMedianFilter": True,
+            "projectionMedianKernel": 3,
+            "rescale_intercept": -502.588,
+            "rescale_slope": -7.99,
+            "ringCorrection": True,
+            "ringKernelSize": 15,
+            "rotation": "0.0",
+            "roiCenterX": "4.75",
+            "roiCenterY": "20.375",
+            "roiCenterZ": "-33.75",
+            "rowCount": "1944",
+            "voxelPixelSize": "0.1",
+            "voxelSizeX": "192",
+            "voxelSizeY": "256",
+            "voxelSizeZ": "768",
+            "xSpacing": "0.0748",
+            "ySpacing": "0.0748",
+        },
+        "ZolixMcController": {"baudrate": 19200, "port": "COM4", "timeout": 400},
+        "CalibResult": {
+            "SOD": 904.95,
+            "SDD": 972.3,
+            "angle_offset_deg": 0.0,
+            "detector_roll_deg": 0.0,
+            "u0_cal": 916.12,
+            "u0_est": 918.49518,
+            "u0_raw": 918.5,
+            "u0_used": 918.49518,
+            "v0_raw": 148.46,
+            "v0_used": 148.46,
+            "theta_cal_deg": 0.17,
+            "roll_source": "disabled_for_legacy",
+            "eta": -3.0e-06,
+            "vc_raw": 1.203457,
+            "vs_raw": -0.158537,
+            "rms_init": 1.0049,
+            "rms_final": 0.7155,
+            "sx": 1.0,
+            "sy": 1.0,
+            "u0_recon": 918.49518,
+            "v0_recon": 148.46,
+            "vc_recon": 1.203457,
+            "vs_recon": -0.158537,
+        },
+    }
+
+
+def _maybe_upgrade_legacy_default_config(cfg_path: str) -> None:
+    import yaml
+
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            config = yaml.load(f, Loader=yaml.FullLoader) or {}
+    except (OSError, yaml.YAMLError):
+        return
+
+    recon = config.get("ReconParam", {})
+    is_legacy_default = (
+        str(recon.get("columnCount")) == "512"
+        and str(recon.get("rowCount")) == "512"
+        and str(recon.get("voxelPixelSize")) == "0.25"
+        and str(recon.get("voxelSizeX")) == "512"
+        and str(recon.get("voxelSizeY")) == "512"
+        and str(recon.get("voxelSizeZ")) == "512"
+        and "projectionMedianFilter" not in recon
+    )
+    if not is_legacy_default:
+        return
+
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        yaml.dump(_recommended_default_config(), f, Dumper=yaml.Dumper, allow_unicode=True)
+    print(f"[Config] 检测到旧版默认重建配置，已升级为推荐默认配置: {cfg_path}")
+
+
 def get_base_path() -> str:
     """
     返回项目根目录（代码所在目录）。
@@ -64,6 +166,7 @@ def ensure_config_exists() -> str:
     """
     cfg_path = get_config_path()
     if os.path.isfile(cfg_path):
+        _maybe_upgrade_legacy_default_config(cfg_path)
         return cfg_path
 
     resource_default = get_resource_path(os.path.join("config", "default_config.yaml"))
@@ -78,36 +181,8 @@ def ensure_config_exists() -> str:
     import yaml
 
     os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
-    default_config = {
-        "BrightController": {"baudrate": 38400, "port": "COM3", "timeout": 4},
-        "CalibrationParam": {
-            "BBNumber": 6,
-            "detectorHeight": 1944,
-            "detectorPixelSize": 0.0748,
-            "detectorWidth": 1536,
-        },
-        "ReconParam": {
-            "SDD": "978.11",
-            "SOD": "910.7",
-            "angle": "1",
-            "columnCount": "512",
-            "detectorX": "751.77",
-            "detectorY": "1013.91",
-            "rescale_intercept": "-502.588",
-            "rescale_slope": "-7.99",
-            "rotation": "0.0",
-            "rowCount": "512",
-            "voxelPixelSize": "0.25",
-            "voxelSizeX": "512",
-            "voxelSizeY": "512",
-            "voxelSizeZ": "512",
-            "xSpacing": "0.2244",
-            "ySpacing": "0.284",
-        },
-        "ZolixMcController": {"baudrate": 19200, "port": "COM4", "timeout": 400},
-    }
     with open(cfg_path, "w", encoding="utf-8") as f:
-        yaml.dump(default_config, f, Dumper=yaml.Dumper, allow_unicode=True)
+        yaml.dump(_recommended_default_config(), f, Dumper=yaml.Dumper, allow_unicode=True)
     print(f"[Config] 创建默认配置 {cfg_path}")
     return cfg_path
 
