@@ -361,20 +361,33 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.xray_refresh_timer.isActive():
             self.xray_refresh_timer.start()
 
+    def xray_on_with_current_settings(self) -> bool:
+        if self.xray_controller is None:
+            raise RuntimeError("X射线控制器未连接")
+        target_voltage = int(self.voltage_line_edit.text().strip())
+        target_current = int(self.current_line_edit.text().strip())
+
+        with self.xray_controller.lock:
+            ret = self.xray_controller.set_voltage(target_voltage)
+            if not ret:
+                raise RuntimeError("设置电压失败")
+            ret = self.xray_controller.set_current(target_current)
+            if not ret:
+                raise RuntimeError("设置电流失败")
+            ret = self.xray_controller.set_focus_mode(2)
+            if not ret:
+                raise RuntimeError("设置焦点失败")
+            ret = self.xray_controller.xray_on()
+            if not ret:
+                raise RuntimeError("开启X射线失败")
+        return True
+
     def xray_warm(self):
-        ret = self.xray_controller.set_voltage(int(self.voltage_line_edit.text()))
-        if not ret:
-            QtWidgets.QMessageBox.critical(self, "警告", "设置电压失败")
+        try:
+            self.xray_on_with_current_settings()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "警告", str(e))
             return
-        ret = self.xray_controller.set_current(int(self.current_line_edit.text()))
-        if not ret:
-            QtWidgets.QMessageBox.critical(self, "警告", "设置电流失败")
-            return
-        ret = self.xray_controller.set_focus_mode(2)
-        if not ret:
-            QtWidgets.QMessageBox.critical(self, "警告", "设置电流失败")
-            return
-        self.xray_controller.xray_on()
         self.xray_in_control = True
         for w in self.xray_wdigets:
             w.setEnabled(False)

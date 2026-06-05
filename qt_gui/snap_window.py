@@ -185,8 +185,7 @@ class SnapWindow(QtWidgets.QDialog):
 
             # seq exposeTime gapTime number
             if self.snap_type == SnapType.EMPTY:
-                xray_controller = self.parent_window.xray_controller
-                xray_controller.xray_on()
+                self.parent_window.xray_on_with_current_settings()
                 time_out = 20
                 t = 0
                 while True:

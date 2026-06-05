@@ -230,8 +230,7 @@ class ScanWindow(QtWidgets.QDialog):
             speed = int(self.rotation_speed_line_edit.text().strip())
             controller.set_speed(speed)
             controller.set_init_speed(speed)
-            xray_controller = self.parent_window.xray_controller
-            xray_controller.xray_on()
+            self.parent_window.xray_on_with_current_settings()
             time_out = 20
             t = 0
 

@@ -18,7 +18,7 @@ class SerialController:
             raise Exception('Serial port not open')
         self.ser.flushInput()
         self.ser.flushOutput()
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def send(self, msg):
         self.lock.acquire()
