@@ -158,6 +158,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_line_edit = self.ui.findChild(
             QtWidgets.QLineEdit, "currentLineEdit"
         )
+        self.focus_mode_combo_box = self.ui.findChild(
+            QtWidgets.QComboBox, "focusModeComboBox"
+        )
         self.xray_status_label = self.ui.findChild(QtWidgets.QLabel, "xrayStatusLabel")
         self.xray_refresh_timer = QtCore.QTimer()
         self.xray_refresh_timer.timeout.connect(self.refresh_xray_status)
@@ -185,6 +188,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.current_number,
             self.voltage_line_edit,
             self.current_line_edit,
+            self.focus_mode_combo_box,
             self.xray_warm_button,
             self.xray_reconnect_button,
             self.xray_off_button,
@@ -366,6 +370,7 @@ class MainWindow(QtWidgets.QMainWindow):
             raise RuntimeError("X射线控制器未连接")
         target_voltage = int(self.voltage_line_edit.text().strip())
         target_current = int(self.current_line_edit.text().strip())
+        focus_mode = self.focus_mode_combo_box.currentIndex()
 
         with self.xray_controller.lock:
             ret = self.xray_controller.set_voltage(target_voltage)
@@ -374,7 +379,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ret = self.xray_controller.set_current(target_current)
             if not ret:
                 raise RuntimeError("设置电流失败")
-            ret = self.xray_controller.set_focus_mode(2)
+            ret = self.xray_controller.set_focus_mode(focus_mode)
             if not ret:
                 raise RuntimeError("设置焦点失败")
             ret = self.xray_controller.xray_on()

@@ -251,8 +251,8 @@
       <widget class="QLabel" name="label_5">
        <property name="geometry">
         <rect>
-         <x>40</x>
-         <y>110</y>
+         <x>30</x>
+         <y>140</y>
          <width>53</width>
          <height>15</height>
         </rect>
@@ -264,8 +264,8 @@
       <widget class="QLabel" name="xrayStatusLabel">
        <property name="geometry">
         <rect>
-         <x>130</x>
-         <y>110</y>
+         <x>100</x>
+         <y>140</y>
          <width>53</width>
          <height>15</height>
         </rect>
@@ -278,7 +278,7 @@
        <property name="geometry">
         <rect>
          <x>60</x>
-         <y>140</y>
+         <y>170</y>
          <width>75</width>
          <height>23</height>
         </rect>
@@ -291,7 +291,7 @@
        <property name="geometry">
         <rect>
          <x>60</x>
-         <y>180</y>
+         <y>210</y>
          <width>75</width>
          <height>23</height>
         </rect>
@@ -304,14 +304,55 @@
        <property name="geometry">
         <rect>
          <x>180</x>
-         <y>140</y>
+         <y>170</y>
          <width>75</width>
          <height>23</height>
         </rect>
        </property>
        <property name="text">
-        <string>重新连接</string>
+       <string>重新连接</string>
        </property>
+      </widget>
+      <widget class="QLabel" name="label_focus_mode">
+       <property name="geometry">
+        <rect>
+         <x>30</x>
+         <y>100</y>
+         <width>53</width>
+         <height>15</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>焦斑设置</string>
+       </property>
+      </widget>
+      <widget class="QComboBox" name="focusModeComboBox">
+       <property name="geometry">
+        <rect>
+         <x>100</x>
+         <y>96</y>
+         <width>113</width>
+         <height>22</height>
+        </rect>
+       </property>
+       <property name="currentIndex">
+        <number>2</number>
+       </property>
+       <item>
+        <property name="text">
+         <string>small</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>median</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>large</string>
+        </property>
+       </item>
       </widget>
      </widget>
      <widget class="QWidget" name="tab_2">
