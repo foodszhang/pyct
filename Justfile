@@ -22,6 +22,10 @@ rebuild:
 package:
     powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage package
 
+# 在已有 dist 基础上组装便携目录 + 打 zip，不打包 py34
+package-no-py34:
+    powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage package-no-py34
+
 # 完整流程：setup + build + package
 full:
     powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage full
@@ -49,3 +53,7 @@ conda-full:
 # 在已有 conda dist 基础上组装便携目录 + zip（CUDA 11 版本）
 conda-package:
     powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-package
+
+# 在已有 conda dist 基础上组装便携目录 + zip（CUDA 11 版本），不打包 py34
+conda-package-no-py34:
+    powershell -ExecutionPolicy Bypass -File scripts\build_win.ps1 -Stage conda-package-no-py34

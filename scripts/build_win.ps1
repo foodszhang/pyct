@@ -5,13 +5,14 @@
 #   .\scripts\build_win.ps1 -Stage build    # PyInstaller 构建（清理后）
 #   .\scripts\build_win.ps1 -Stage rebuild  # PyInstaller 增量构建
 #   .\scripts\build_win.ps1 -Stage package  # 组装便携目录 + zip
+#   .\scripts\build_win.ps1 -Stage package-no-py34  # 组装便携目录 + zip，不打包 py34
 #   .\scripts\build_win.ps1 -Stage full     # setup + build + package
 #   .\scripts\build_win.ps1 -Stage clean    # 清理
 #   .\scripts\build_win.ps1                 # 默认 = full
 # ============================================================
 
 param(
-    [ValidateSet("setup", "build", "rebuild", "package", "full", "clean", "conda-setup", "conda-build", "conda-full", "conda-fix", "conda-package")]
+    [ValidateSet("setup", "build", "rebuild", "package", "package-no-py34", "full", "clean", "conda-setup", "conda-build", "conda-full", "conda-fix", "conda-package", "conda-package-no-py34")]
     [string]$Stage = "full",
     [string]$AstraWhl = ""
 )
@@ -135,15 +136,16 @@ function Invoke-Rebuild {
 function Invoke-Package {
     param(
         [ValidateSet("uv", "conda")]
-        [string]$Variant = "uv"
+        [string]$Variant = "uv",
+        [bool]$IncludePy34 = $true
     )
 
     if ($Variant -eq "conda") {
         $PackDistDir = $CondaDistDir
-        $ZipSuffix   = "cuda11"
+        $ZipSuffix   = if ($IncludePy34) { "cuda11" } else { "cuda11_no_py34" }
     } else {
         $PackDistDir = $UvDistDir
-        $ZipSuffix   = "cuda12"
+        $ZipSuffix   = if ($IncludePy34) { "cuda12" } else { "cuda12_no_py34" }
     }
 
     # 兼容 onedir 和 onefile 两种 spec 模式
@@ -158,30 +160,35 @@ function Invoke-Package {
     if (-not (Test-Path "$PackDistDir\config")) { New-Item -ItemType Directory "$PackDistDir\config" | Out-Null }
     Copy-Item "$RepoRoot\config.yaml" "$PackDistDir\config\default_config.yaml" -Force
 
-    # detector_bridge + py34
+    # detector_bridge + optional py34
     $DetBridge = "$PackDistDir\detector_bridge"
     if (-not (Test-Path $DetBridge)) { New-Item -ItemType Directory $DetBridge | Out-Null }
     Copy-Item "$RepoRoot\detector.py" "$DetBridge\detector.py" -Force -ErrorAction SilentlyContinue
 
-    $Py34Sources = @(
-        "$RepoRoot\detector_bridge\py34",
-        "C:\Python34",
-        "D:\Python34"
-    )
-    $Py34Copied = $false
-    foreach ($src in $Py34Sources) {
-        if (Test-Path "$src\python.exe") {
-            Write-Host "  Copying Python 3.4 from: $src" -ForegroundColor Yellow
-            $dest = "$DetBridge\py34"
-            if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-            Copy-Item $src $dest -Recurse -Force
-            $Py34Copied = $true
-            Write-Host "  Python 3.4 copied" -ForegroundColor Green
-            break
+    $Py34Dest = "$DetBridge\py34"
+    if ($IncludePy34) {
+        $Py34Sources = @(
+            "$RepoRoot\detector_bridge\py34",
+            "C:\Python34",
+            "D:\Python34"
+        )
+        $Py34Copied = $false
+        foreach ($src in $Py34Sources) {
+            if (Test-Path "$src\python.exe") {
+                Write-Host "  Copying Python 3.4 from: $src" -ForegroundColor Yellow
+                if (Test-Path $Py34Dest) { Remove-Item -Recurse -Force $Py34Dest }
+                Copy-Item $src $Py34Dest -Recurse -Force
+                $Py34Copied = $true
+                Write-Host "  Python 3.4 copied" -ForegroundColor Green
+                break
+            }
         }
-    }
-    if (-not $Py34Copied) {
-        Write-Warning "  Python 3.4 not found. Place in: $RepoRoot\detector_bridge\py34\"
+        if (-not $Py34Copied) {
+            Write-Warning "  Python 3.4 not found. Place in: $RepoRoot\detector_bridge\py34\"
+        }
+    } else {
+        if (Test-Path $Py34Dest) { Remove-Item -Recurse -Force $Py34Dest }
+        Write-Host "  Python 3.4 skipped; use env var py34 or place detector_bridge\py34 beside PyCT.exe" -ForegroundColor Yellow
     }
 
     # SDK
@@ -208,7 +215,7 @@ function Invoke-Package {
     # README
     @"
 # Detector Bridge (Python 3.4)
-Place Python 3.4 portable runtime in py34\ subdirectory.
+Place Python 3.4 portable runtime in py34\ subdirectory, or set py34 environment variable.
 Structure: detector_bridge\py34\python.exe
 Without py34, calibration and reconstruction still work (offline mode).
 "@ | Out-File -Encoding utf8 "$DetBridge\README.txt"
@@ -505,6 +512,7 @@ switch ($Stage) {
     "build"       { Invoke-Build }
     "rebuild"     { Invoke-Rebuild }
     "package"     { Invoke-Package -Variant "uv" }
+    "package-no-py34" { Invoke-Package -Variant "uv" -IncludePy34 $false }
     "full"        { Invoke-Setup; Invoke-Build; Invoke-Package -Variant "uv" }
     "clean"       { Invoke-Clean }
     "conda-setup" { Invoke-CondaSetup }
@@ -512,6 +520,7 @@ switch ($Stage) {
     "conda-build" { Invoke-CondaBuild }
     "conda-full"  { Invoke-CondaSetup; Invoke-CondaBuild; Invoke-Package -Variant "conda" }
     "conda-package" { Invoke-Package -Variant "conda" }
+    "conda-package-no-py34" { Invoke-Package -Variant "conda" -IncludePy34 $false }
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
