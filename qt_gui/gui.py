@@ -373,15 +373,15 @@ class MainWindow(QtWidgets.QMainWindow):
         focus_mode = self.focus_mode_combo_box.currentIndex()
 
         with self.xray_controller.lock:
+            ret = self.xray_controller.set_focus_mode(focus_mode)
+            if not ret:
+                raise RuntimeError("设置焦点失败")
             ret = self.xray_controller.set_voltage(target_voltage)
             if not ret:
                 raise RuntimeError("设置电压失败")
             ret = self.xray_controller.set_current(target_current)
             if not ret:
                 raise RuntimeError("设置电流失败")
-            ret = self.xray_controller.set_focus_mode(focus_mode)
-            if not ret:
-                raise RuntimeError("设置焦点失败")
             ret = self.xray_controller.xray_on()
             if not ret:
                 raise RuntimeError("开启X射线失败")

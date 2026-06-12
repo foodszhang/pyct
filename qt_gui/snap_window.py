@@ -6,6 +6,7 @@ from threading import Thread
 import subprocess
 import pipe
 import os
+import re
 import numpy as np
 import cv2
 import qt_gui.reconstruction as rec
@@ -69,6 +70,16 @@ def _close_listener(listener_holder):
         listener.close()
     except Exception:
         pass
+
+
+def _calibration_filename_with_exposure(filename: str, exposure_time: int) -> str:
+    stem, ext = os.path.splitext(filename.strip())
+    if not ext:
+        ext = ".tif"
+    if re.search(r"_\d+(?:\.\d+)?ms$", stem):
+        return f"{stem}{ext}"
+    return f"{stem}_{exposure_time}ms{ext}"
+
 
 loader = QUiLoader()
 Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
@@ -156,10 +167,15 @@ class SnapWindow(QtWidgets.QDialog):
                 return
             print(f"[Detector] 使用 py34: {py34}")
 
-            full_filename = os.path.join(
-                self.parent_window.project_path, self.file_name_line_edit.text().strip()
+            expose_time = int(self.expose_time_line_edit.text().strip())
+            if expose_time <= 0:
+                raise ValueError("曝光时间必须大于0")
+            filename = _calibration_filename_with_exposure(
+                self.file_name_line_edit.text().strip(), expose_time
             )
+            full_filename = os.path.join(self.parent_window.project_path, filename)
             self.full_filename = full_filename
+            print(f"[Snap] 校正图保存为 {full_filename}")
 
             ready_event = threading.Event()
             server_thread = Thread(
@@ -218,8 +234,8 @@ class SnapWindow(QtWidgets.QDialog):
                     str(py34),
                     detector_script,
                     "seq",
-                    self.expose_time_line_edit.text().strip(),
-                    self.expose_time_line_edit.text().strip(),
+                    str(expose_time),
+                    str(expose_time),
                     self.number_line_edit.text().strip(),
                 ],
                 cwd=detector_bridge_dir,

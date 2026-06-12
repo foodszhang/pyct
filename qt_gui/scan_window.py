@@ -6,6 +6,7 @@ from threading import Thread
 import subprocess
 import pipe
 import os
+import re
 import numpy as np
 import cv2
 import qt_gui.reconstruction as rec
@@ -72,6 +73,24 @@ def _close_listener(listener_holder):
 def _format_angle_name(angle_deg):
     return f"{float(angle_deg):.6f}".rstrip("0").rstrip(".")
 
+
+def _split_calibration_filename(filename: str) -> tuple[str, str, float | None]:
+    stem, ext = os.path.splitext(filename.strip())
+    match = re.search(r"_(\d+(?:\.\d+)?)ms$", stem)
+    if not ext:
+        ext = ".tif"
+    if match:
+        return stem[: match.start()], ext, float(match.group(1))
+    return stem, ext, None
+
+
+def _calibration_filename_with_exposure(filename: str, exposure_time: int) -> str:
+    base, ext, existing_exp = _split_calibration_filename(filename)
+    if existing_exp is not None and abs(existing_exp - exposure_time) < 1e-6:
+        return filename.strip()
+    return f"{base}_{exposure_time}ms{ext}"
+
+
 loader = QUiLoader()
 Config = yaml.load(open(get_config_path()), Loader=yaml.FullLoader)
 
@@ -112,6 +131,72 @@ class ScanWindow(QtWidgets.QDialog):
         self.projection_normalized = False
         self.img_dict = {}
         self.fut_list = []
+
+    def _load_calibration_image(self, filename: str, scan_exposure_time: int, label: str):
+        filename = filename.strip()
+        if not filename:
+            return None, None
+
+        preferred_filename = _calibration_filename_with_exposure(
+            filename, scan_exposure_time
+        )
+        candidates = [preferred_filename]
+
+        base, ext, _ = _split_calibration_filename(filename)
+        try:
+            project_files = os.listdir(self.parent_window.project_path)
+        except OSError:
+            project_files = []
+        pattern = re.compile(
+            rf"^{re.escape(base)}_(\d+(?:\.\d+)?)ms{re.escape(ext)}$",
+            re.IGNORECASE,
+        )
+        exposure_candidates = []
+        for project_file in project_files:
+            match = pattern.match(project_file)
+            if not match:
+                continue
+            exposure = float(match.group(1))
+            exposure_candidates.append(
+                (abs(exposure - scan_exposure_time), exposure, project_file)
+            )
+        exposure_candidates.sort(key=lambda item: item[0])
+        candidates.extend(item[2] for item in exposure_candidates)
+        if preferred_filename != filename:
+            candidates.append(filename)
+
+        seen = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            path = os.path.join(self.parent_window.project_path, candidate)
+            if not os.path.exists(path):
+                continue
+            img = cv2.imread(path, -1)
+            if img is None:
+                raise ValueError(f"{label}校正图读取失败: {path}")
+            _, _, exposure = _split_calibration_filename(candidate)
+            img = img.astype(np.float32)
+            if exposure is None:
+                print(f"[Scan] {label}使用 {candidate}，文件名无曝光时间，未做比例缩放")
+                return img, path
+            if exposure <= 0:
+                raise ValueError(f"{label}校正图曝光时间必须大于0: {candidate}")
+            scale = float(scan_exposure_time) / exposure
+            if abs(scale - 1.0) > 1e-6:
+                print(
+                    f"[Scan] {label}使用 {candidate}，"
+                    f"{exposure:g}ms -> {scan_exposure_time}ms，scale={scale:.6g}"
+                )
+                img *= scale
+            else:
+                print(f"[Scan] {label}使用 {candidate}，曝光时间匹配")
+            return img, path
+
+        return None, os.path.join(
+            self.parent_window.project_path, preferred_filename
+        )
 
     def detector_receive(self, conn):
         dark = None
@@ -227,6 +312,8 @@ class ScanWindow(QtWidgets.QDialog):
             scan_mode = self.scan_mode
             if self.scan_number <= 0:
                 raise ValueError("采集图片张数必须大于0")
+            if expose_time <= 0:
+                raise ValueError("曝光时间必须大于0")
             speed = int(self.rotation_speed_line_edit.text().strip())
             controller.set_speed(speed)
             controller.set_init_speed(speed)
@@ -256,34 +343,21 @@ class ScanWindow(QtWidgets.QDialog):
                     return
 
             missing_paths = []
-            if self.dark_line_edit.text().strip():
-                dark_path = os.path.join(
-                    self.parent_window.project_path, self.dark_line_edit.text().strip()
+            try:
+                self.dark_img, dark_path = self._load_calibration_image(
+                    self.dark_line_edit.text(), expose_time, "暗场"
                 )
-                if os.path.exists(dark_path):
-                    self.dark_img = cv2.imread(dark_path, -1)
-                    if self.dark_img is None:
-                        missing_paths.append(dark_path)
-                    else:
-                        self.dark_img = self.dark_img.astype(np.float32)
-                else:
-                    missing_paths.append(dark_path)
-            else:
-                self.dark_img = None
-            if self.empty_line_edit.text().strip():
-                empty_path = os.path.join(
-                    self.parent_window.project_path, self.empty_line_edit.text().strip()
+                self.empty_img, empty_path = self._load_calibration_image(
+                    self.empty_line_edit.text(), expose_time, "平场"
                 )
-                if os.path.exists(empty_path):
-                    self.empty_img = cv2.imread(empty_path, -1)
-                    if self.empty_img is None:
-                        missing_paths.append(empty_path)
-                    else:
-                        self.empty_img = self.empty_img.astype(np.float32)
-                else:
-                    missing_paths.append(empty_path)
-            else:
-                self.empty_img = None
+            except ValueError as e:
+                self.error.emit(str(e))
+                self._unfreeze_ui()
+                return
+            if self.dark_line_edit.text().strip() and self.dark_img is None:
+                missing_paths.append(dark_path)
+            if self.empty_line_edit.text().strip() and self.empty_img is None:
+                missing_paths.append(empty_path)
             if missing_paths:
                 self.error.emit("校正文件不存在:\n" + "\n".join(missing_paths))
                 self._unfreeze_ui()
